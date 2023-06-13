@@ -1,6 +1,6 @@
 //! Repository addresser
 use std::fs;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
@@ -78,6 +78,40 @@ impl NssRepository {
 
     pub fn head_path(&self) -> PathBuf {
         self.root.clone().join(".nss").join("HEAD")
+    }
+
+    pub fn write_head<S>(&self, hash_or_bookmark: S) -> Result<()>
+    where
+        S: AsRef<str>,
+    {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(self.head_path())?;
+
+        file.write_all(format!("bookmarker: {}", hash_or_bookmark.as_ref()).as_bytes())?;
+
+        Ok(())
+    }
+
+    pub fn read_head(&self) -> Result<Object> {
+        let mut file = File::open(self.head_path())?;
+        let mut referece = String::new();
+        file.read_to_string(&mut referece)?;
+
+        let prefix_path = referece.split(' ').collect::<Vec<&str>>();
+
+        if prefix_path[1].contains('/') {
+            let bookmarker = prefix_path[1].split('/').collect::<Vec<&str>>()[2];
+
+            let mut file = File::open(self.bookmarks_path(bookmarker)).unwrap();
+            let mut hash = String::new();
+            file.read_to_string(&mut hash).unwrap();
+
+            return self.read_object(hash);
+        }
+
+        self.read_object(prefix_path[1])
     }
 
     pub fn index_path(&self) -> PathBuf {

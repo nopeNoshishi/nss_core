@@ -2,11 +2,18 @@
 use std::path::Path;
 
 // External
-use anyhow::Result;
+use anyhow::{bail, Result};
 use sha1::{Digest, Sha1};
+use thiserror::Error;
 
 // Internal
 use super::{Blob, Commit, Tree};
+
+#[derive(Error, Debug)]
+enum ObjectError {
+    #[error("No existed path!")]
+    NotFoundPath,
+}
 
 /// **Object Enum**
 ///
@@ -23,6 +30,9 @@ impl Object {
     ///
     /// This path must be in the working directory.
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        if !path.as_ref().exists() {
+            bail!(ObjectError::NotFoundPath)
+        }
         match path.as_ref().is_file() {
             true => Blob::new(path.as_ref()).map(Object::Blob),
             false => Tree::new(path.as_ref()).map(Object::Tree),

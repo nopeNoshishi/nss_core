@@ -16,9 +16,7 @@ pub fn open_file_trucate<P: AsRef<Path>>(file_path: P, buffer: &[u8]) -> std::io
         .truncate(true)
         .open(file_path)?;
 
-    file.write_all(buffer)?;
-
-    Ok(())
+    file.write_all(buffer)
 }
 
 pub fn create_file_with_buffer<P: AsRef<Path>>(file_path: P, buffer: &[u8]) -> std::io::Result<()> {
@@ -27,15 +25,19 @@ pub fn create_file_with_buffer<P: AsRef<Path>>(file_path: P, buffer: &[u8]) -> s
         .create_new(true)
         .open(file_path)?;
 
-    file.write_all(buffer)?;
-
-    Ok(())
+    file.write_all(buffer)
 }
 
 pub fn create_dir<P: AsRef<Path>>(dir_path: P) -> std::io::Result<()> {
-    fs::create_dir_all(dir_path)?;
+    fs::create_dir_all(dir_path)
+}
 
-    Ok(())
+pub fn remove_file<P: AsRef<Path>>(path: P) -> std::io::Result<()> {
+    fs::remove_file(path)
+}
+
+pub fn remove_dir_all<P: AsRef<Path>>(path: P) -> std::io::Result<()> {
+    fs::remove_dir_all(path)
 }
 
 pub fn exists_repo<P: AsRef<Path>>(repo_dir: Option<P>) -> Result<PathBuf> {

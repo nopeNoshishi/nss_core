@@ -81,6 +81,55 @@ impl FileMeta {
         })
     }
 
+    pub fn new_temp<P>(temp_path: P, temp_prefix: P) -> Result<Self>
+    where
+        P: AsRef<Path>,
+    {
+        // NOTE: Only unix metadata
+        use std::os::unix::prelude::MetadataExt;
+
+        let path = temp_path.as_ref();
+        // Exstract metadata on file
+        let metadata = path.metadata().unwrap();
+        let ctime = metadata.ctime() as u32;
+        let ctime_nsec = metadata.ctime_nsec() as u32;
+        let mtime = metadata.mtime() as u32;
+        let mtime_nsec = metadata.mtime_nsec() as u32;
+        let dev = metadata.dev() as u32;
+        let ino = metadata.ino() as u32;
+        let mode = metadata.mode();
+        let uid = metadata.uid();
+        let gid = metadata.gid();
+        let filesize = metadata.size() as u32;
+
+        let object = Blob::new(path).unwrap();
+        let hash = object.to_hash();
+
+        // absolute path -> relative path (from temp path)
+        let filename = path
+            .strip_prefix(&temp_prefix)
+            .unwrap()
+            .as_os_str()
+            .to_os_string();
+        let filename_size = filename.len() as u16;
+
+        Ok(Self {
+            ctime,
+            ctime_nsec,
+            mtime,
+            mtime_nsec,
+            dev,
+            ino,
+            mode,
+            uid,
+            gid,
+            filesize,
+            hash,
+            filename_size,
+            filename,
+        })
+    }
+
     /// TODO: Documentation
     pub fn from_rawindex(buf: &[u8]) -> Self {
         let ctime = BigEndian::read_u32(&buf[0..4]);

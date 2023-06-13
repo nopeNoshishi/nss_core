@@ -1,4 +1,5 @@
 // Std
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 // External
@@ -7,7 +8,7 @@ use byteorder::{BigEndian, ByteOrder};
 use serde::{Deserialize, Serialize};
 
 // Internal
-use super::{FileMeta, Object, Tree};
+use super::{Blob, FileMeta, Hashable, Object, Tree};
 use crate::nss_io::file_system;
 use crate::repo::repository::NssRepository;
 
@@ -40,12 +41,14 @@ impl Index {
         })
     }
 
-    pub fn add<P>(&mut self, repo_path: P, file_path: P) -> Result<()>
+    pub fn add<P>(&mut self, file_path: P, temp_prefix: Option<P>) -> Result<()>
     where
         P: AsRef<Path>,
     {
-        let repo_path = repo_path.as_ref();
-        let add_filemeta = FileMeta::new(repo_path.join(file_path))?;
+        let add_filemeta = match temp_prefix {
+            Some(p) => FileMeta::new_temp(file_path, p)?,
+            None => FileMeta::new(file_path)?,
+        };
 
         let mut new_filemetas: Vec<FileMeta> = vec![];
         for filemeta in self.filemetas.clone() {
@@ -61,6 +64,28 @@ impl Index {
 
         Ok(())
     }
+
+    pub fn try_from_tree(repository: &NssRepository, tree: Tree) -> Result<Self> {
+        let mut index = Index::empty();
+        let mut path_blob: HashMap<PathBuf, Blob> = HashMap::new();
+
+        let temp_dir = repository.temp_path(hex::encode(tree.to_hash()));
+        file_system::create_dir(&temp_dir)?;
+
+        push_paths(repository, &mut path_blob, tree, &temp_dir)?;
+
+        // Tempolary create file -> filemeta
+        for (path, blob) in path_blob {
+            file_system::create_dir(path.parent().unwrap())?;
+            file_system::create_file_with_buffer(&path, &blob.content)?;
+
+            index.add(path, Some(temp_dir.clone()))?;
+        }
+
+        file_system::remove_dir_all(temp_dir)?;
+
+        Ok(index)
+    }
 }
 
 fn padding(size: usize) -> usize {
@@ -71,57 +96,33 @@ fn padding(size: usize) -> usize {
     target - size
 }
 
-impl TryFrom<Tree> for Index {
-    type Error = anyhow::Error;
-
-    fn try_from(tree: Tree) -> Result<Self, anyhow::Error> {
-        let mut index = Index::empty();
-        let mut paths: Vec<PathBuf> = vec![];
-
-        let repo_path = file_system::exists_repo::<PathBuf>(None)?;
-        push_paths(
-            NssRepository::new(repo_path.clone()),
-            &mut paths,
-            tree,
-            &repo_path.clone(),
-        )?;
-
-        for file_path in paths {
-            index.add(&repo_path, &file_path)?
-        }
-
-        Ok(index)
-    }
-}
-
 fn push_paths(
-    repository: NssRepository,
-    paths: &mut Vec<PathBuf>,
+    repository: &NssRepository,
+    path_blob: &mut HashMap<PathBuf, Blob>,
     tree: Tree,
     base_path: &Path,
 ) -> Result<()> {
     for entry in tree.entries {
-        let path = base_path.join(entry.name);
-        if path.is_file() {
-            paths.push(path);
+        let path = base_path.join(&entry.name);
+
+        if entry.as_type() == "blob" {
+            let blob = match repository.read_object(hex::encode(&entry.hash))? {
+                Object::Blob(b) => b,
+                _ => bail!("{} is not blob hash", hex::encode(entry.hash)),
+            };
+            path_blob.insert(path, blob);
         } else {
             let hash = hex::encode(entry.hash);
-            let sub_tree = to_tree(repository.clone(), &hash)?;
+            let sub_tree = match repository.read_object(&hash)? {
+                Object::Tree(t) => t,
+                _ => bail!("{} is not tree hash", hash),
+            };
 
-            push_paths(repository.clone(), paths, sub_tree, &path)?
+            push_paths(repository, path_blob, sub_tree, &path)?
         }
     }
 
     Ok(())
-}
-
-fn to_tree(repository: NssRepository, hash: &str) -> Result<Tree, anyhow::Error> {
-    let object = repository.read_object(hash)?;
-
-    match object {
-        Object::Tree(t) => Ok(t),
-        _ => bail!("{} is not tree hash", hash),
-    }
 }
 
 pub trait IndexVesion1 {

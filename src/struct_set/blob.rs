@@ -154,6 +154,30 @@ fn commit(message: &str) -> std::io::Result<()> {
     }
 
     #[test]
+    fn test_blob_to_hash() {
+        // Create a Blob instance
+        let content = b"#[allow(dead_code)]
+fn commit(message: &str) -> std::io::Result<()> {
+    let tree_hash = write_tree()?;
+    match commit_tree(&tree_hash, message)? {
+        Some(c) => update_ref(&c)?,
+        _ => println!(\"Nothing to commit\")
+    };
+
+    Ok(())
+}";
+        let blob = Blob {
+            content: content.to_vec(),
+        };
+
+        // Vertify hash
+        assert_eq!(
+            blob.to_hash(),
+            hex::decode("5c73008ba75573c20d6a8a6e557d0556d4a84133".as_bytes()).unwrap()
+        );
+    }
+
+    #[test]
     fn test_blob_display() {
         // Create a Blob instance
         let blob = Blob {

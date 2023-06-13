@@ -71,6 +71,14 @@ impl Entry {
 
         [header.as_bytes(), &self.hash].concat()
     }
+
+    pub fn as_type(&self) -> &str {
+        match self.mode.to_be_bytes()[2] >> 4 {
+            4 => "tree",
+            8 => "blob",
+            _ => "unknown",
+        }
+    }
 }
 
 impl From<FileMeta> for Entry {
