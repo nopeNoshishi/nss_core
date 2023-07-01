@@ -5,14 +5,16 @@ use std::path::Path;
 // External
 use anyhow::Result;
 use byteorder::{BigEndian, ByteOrder};
-use serde::{Deserialize, Serialize};
+use chrono::prelude::Local;
+use chrono::TimeZone;
+
+// TODO use serde::{Deserialize, Serialize};
 
 // Internal
 use super::{Blob, Hashable};
-use crate::nss_io::file_system;
+use crate::repository::NssRepository;
 
-/// TODO: Documentation
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone)]
 pub struct FileMeta {
     pub ctime: u32,
     pub ctime_nsec: u32,
@@ -30,11 +32,7 @@ pub struct FileMeta {
 }
 
 impl FileMeta {
-    /// TODO: Documentation
-    pub fn new<P>(path: P) -> Result<Self>
-    where
-        P: AsRef<Path>,
-    {
+    pub fn new<P: AsRef<Path>>(repository: &NssRepository, path: P) -> Result<Self> {
         // NOTE: Only unix metadata
         use std::os::unix::prelude::MetadataExt;
 
@@ -52,13 +50,12 @@ impl FileMeta {
         let gid = metadata.gid();
         let filesize = metadata.size() as u32;
 
-        let object = Blob::new(path).unwrap();
+        let object = Blob::new(path)?;
         let hash = object.to_hash();
 
         // absolute path -> relative path (from repo path)
-        let repo_path = file_system::exists_repo::<P>(None)?;
         let filename = path
-            .strip_prefix(&repo_path)
+            .strip_prefix(repository.path())
             .unwrap()
             .as_os_str()
             .to_os_string();
@@ -81,10 +78,7 @@ impl FileMeta {
         })
     }
 
-    pub fn new_temp<P>(temp_path: P, temp_prefix: P) -> Result<Self>
-    where
-        P: AsRef<Path>,
-    {
+    pub fn new_temp<P: AsRef<Path>>(temp_path: P, temp_prefix: P) -> Result<Self> {
         // NOTE: Only unix metadata
         use std::os::unix::prelude::MetadataExt;
 
@@ -102,7 +96,7 @@ impl FileMeta {
         let gid = metadata.gid();
         let filesize = metadata.size() as u32;
 
-        let object = Blob::new(path).unwrap();
+        let object = Blob::new(path)?;
         let hash = object.to_hash();
 
         // absolute path -> relative path (from temp path)
@@ -130,7 +124,6 @@ impl FileMeta {
         })
     }
 
-    /// TODO: Documentation
     pub fn from_rawindex(buf: &[u8]) -> Self {
         let ctime = BigEndian::read_u32(&buf[0..4]);
         let ctime_nsec = BigEndian::read_u32(&buf[4..8]);
@@ -197,16 +190,294 @@ impl PartialEq for FileMeta {
     }
 }
 
+impl std::fmt::Display for FileMeta {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let ctime = Local
+            .timestamp_opt(self.ctime as i64, self.ctime_nsec)
+            .unwrap();
+        let mtime = Local
+            .timestamp_opt(self.mtime as i64, self.mtime_nsec)
+            .unwrap();
+
+        let ctime = format!("Created Time: {}", ctime);
+        let mtime = format!("Modified Time: {}", mtime);
+        let device = format!("Device Id: {}", self.dev);
+        let inode = format!("Inode Number: {}", self.ino);
+        let mode = format!("File Mode: {:0>6o}", self.mode);
+        let uid = format!("User Id: {}", self.uid);
+        let gid = format!("Group Id: {}", self.gid);
+        let file = format!(
+            "Name {} / Size {} / Hash {}",
+            self.filename.to_str().unwrap(),
+            self.filesize,
+            hex::encode(self.hash.clone())
+        );
+
+        write!(
+            f,
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            ctime, mtime, device, inode, mode, uid, gid, file
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::*;
+
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+
+    use testdir::testdir;
 
     #[test]
-    fn test_filemeta_new() {}
+    fn test_filemeta_new() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+
+        let repository = NssRepository::new(temp_dir.clone());
+        fs::copy(test_file_root, repository.path().join("first.rs")).unwrap();
+
+        // Test file
+        let result = FileMeta::new(&repository, repository.path().join("first.rs"));
+        assert!(result.is_ok());
+
+        // Test directory
+        let result = FileMeta::new(&repository, repository.path());
+        assert!(result.is_err());
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
 
     #[test]
-    fn test_filemeta_from_rawindex() {}
+    fn test_filemeta_new_temp() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+
+        fs::copy(test_file_root, temp_dir.join("first.rs")).unwrap();
+
+        // Test file
+        let result = FileMeta::new_temp(&temp_dir.join("first.rs"), &temp_dir);
+        assert!(result.is_ok());
+
+        // Test directory
+        let result = FileMeta::new_temp(&temp_dir, &temp_dir);
+        assert!(result.is_err());
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
 
     #[test]
-    fn test_filemeta_partialeq() {}
+    fn test_filemeta_from_rawindex() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+
+        let repository = NssRepository::new(temp_dir.clone());
+        fs::copy(test_file_root, repository.path().join("first.rs")).unwrap();
+
+        // Rqw content
+        let test_filemeta = FileMeta::new(&repository, repository.path().join("first.rs")).unwrap();
+        let content: Vec<u8> = test_filemeta.as_bytes();
+
+        let filemeta = FileMeta::from_rawindex(&content);
+
+        assert_eq!(filemeta, test_filemeta);
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_filemeta_partialeq() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+        let test_file_root2 = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("second.rs");
+
+        let repository = NssRepository::new(temp_dir.clone());
+        fs::copy(test_file_root, repository.path().join("first.rs")).unwrap();
+        fs::copy(test_file_root2, repository.path().join("second.rs")).unwrap();
+
+        // Rqw content
+        let test_filemeta1 =
+            FileMeta::new(&repository, repository.path().join("first.rs")).unwrap();
+        let test_filemeta2 =
+            FileMeta::new(&repository, repository.path().join("second.rs")).unwrap();
+        assert!(test_filemeta1.eq(&test_filemeta1));
+        assert!(test_filemeta1.ne(&test_filemeta2));
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_as_bytes() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+
+        let repository = NssRepository::new(temp_dir.clone());
+        fs::copy(test_file_root, repository.path().join("first.rs")).unwrap();
+
+        // Rqw content
+        let test_filemeta = FileMeta::new(&repository, repository.path().join("first.rs")).unwrap();
+
+        let test_entry = [
+            test_filemeta.ctime.to_be_bytes(),
+            test_filemeta.ctime_nsec.to_be_bytes(),
+            test_filemeta.mtime.to_be_bytes(),
+            test_filemeta.mtime_nsec.to_be_bytes(),
+            test_filemeta.dev.to_be_bytes(),
+            test_filemeta.ino.to_be_bytes(),
+            test_filemeta.mode.to_be_bytes(),
+            test_filemeta.uid.to_be_bytes(),
+            test_filemeta.gid.to_be_bytes(),
+            250_u32.to_be_bytes(),
+        ]
+        .concat();
+
+        let test_content = [
+            test_entry,
+            hex::decode("5c73008ba75573c20d6a8a6e557d0556d4a84133").unwrap(),
+            8_u16.to_be_bytes().to_vec(),
+            b"first.rs".to_vec(),
+        ]
+        .concat();
+
+        assert_eq!(test_filemeta.as_bytes(), test_content);
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_display() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+
+        let repository = NssRepository::new(temp_dir.clone());
+        fs::copy(test_file_root, repository.path().join("first.rs")).unwrap();
+
+        let test_filemeta = FileMeta::new(&repository, repository.path().join("first.rs")).unwrap();
+        let display = format!("{}", test_filemeta);
+
+        let test_ctime = Local
+            .timestamp_opt(test_filemeta.ctime as i64, test_filemeta.ctime_nsec)
+            .unwrap();
+        let test_mtime = Local
+            .timestamp_opt(test_filemeta.mtime as i64, test_filemeta.mtime_nsec)
+            .unwrap();
+
+        let test_display = format!(
+            "Created Time: {}
+Modified Time: {}
+Device Id: {}
+Inode Number: {}
+File Mode: {:0>6o}
+User Id: {}
+Group Id: {}
+Name first.rs / Size 250 / Hash 5c73008ba75573c20d6a8a6e557d0556d4a84133",
+            test_ctime,
+            test_mtime,
+            test_filemeta.dev,
+            test_filemeta.ino,
+            test_filemeta.mode,
+            test_filemeta.uid,
+            test_filemeta.gid
+        );
+
+        assert_eq!(display, test_display);
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_filemeta_debug() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+
+        let repository = NssRepository::new(temp_dir.clone());
+        fs::copy(test_file_root, repository.path().join("first.rs")).unwrap();
+
+        let filemeta = FileMeta::new(&repository, repository.path().join("first.rs")).unwrap();
+
+        let debug = format!("{:?}", filemeta);
+
+        let test_debug = format!("FileMeta {{ ctime: {}, ctime_nsec: {}, mtime: {}, mtime_nsec: {}, dev: {}, ino: {}, mode: {}, uid: {}, gid: {}, filesize: 250, hash: [92, 115, 0, 139, 167, 85, 115, 194, 13, 106, 138, 110, 85, 125, 5, 86, 212, 168, 65, 51], filename_size: 8, filename: \"first.rs\" }}",
+            filemeta.ctime,
+            filemeta.ctime_nsec,
+            filemeta.mtime,
+            filemeta.mtime_nsec,
+            filemeta.dev,
+            filemeta.ino,
+            filemeta.mode,
+            filemeta.uid,
+            filemeta.gid,
+        );
+
+        assert_eq!(debug, test_debug);
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_filemeta_clone() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+
+        let repository = NssRepository::new(temp_dir.clone());
+        fs::copy(test_file_root, repository.path().join("first.rs")).unwrap();
+
+        let filemeta = FileMeta::new(&repository, repository.path().join("first.rs")).unwrap();
+
+        assert_eq!(filemeta, filemeta.clone());
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
 }

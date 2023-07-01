@@ -1,6 +1,5 @@
 //! Repository addresser
 use std::fs;
-use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
@@ -13,6 +12,7 @@ use flate2::Compression;
 use crate::config::Config;
 use crate::nss_io::file_system;
 use crate::struct_set::{Hashable, Index, IndexVesion1, Object};
+use crate::error::*;
 
 // Manager for repository absolute path
 #[derive(Debug, Clone)]
@@ -63,15 +63,14 @@ impl NssRepository {
     }
 
     pub fn write_config(&self, config: Config) -> Result<()> {
-        file_system::open_file_trucate(self.config_path(), toml::to_string(&config)?.as_bytes())?;
+        let content = toml::to_string(&config)?;
+        file_system::open_file_trucate(self.config_path(), content.as_bytes())?;
 
         Ok(())
     }
 
     pub fn read_config(&self) -> Result<Config> {
-        let mut file = File::open(self.config_path())?;
-        let mut content = String::new();
-        file.read_to_string(&mut content)?;
+        let content = file_system::read_contet_with_string(self.config_path())?;
 
         Ok(toml::from_str(&content)?)
     }
@@ -80,33 +79,20 @@ impl NssRepository {
         self.root.clone().join(".nss").join("HEAD")
     }
 
-    pub fn write_head<S>(&self, hash_or_bookmark: S) -> Result<()>
-    where
-        S: AsRef<str>,
-    {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(self.head_path())?;
-
-        file.write_all(format!("bookmarker: {}", hash_or_bookmark.as_ref()).as_bytes())?;
+    pub fn write_head<S: AsRef<str>>(&self, hash_or_bookmark: S) -> Result<()> {
+        let content = format!("bookmarker: {}", hash_or_bookmark.as_ref());
+        file_system::open_file_trucate(self.config_path(), content.as_bytes())?;
 
         Ok(())
     }
 
     pub fn read_head(&self) -> Result<Object> {
-        let mut file = File::open(self.head_path())?;
-        let mut referece = String::new();
-        file.read_to_string(&mut referece)?;
-
-        let prefix_path = referece.split(' ').collect::<Vec<&str>>();
+        let content = file_system::read_contet_with_string(self.head_path())?;
+        let prefix_path = content.split(' ').collect::<Vec<&str>>();
 
         if prefix_path[1].contains('/') {
             let bookmarker = prefix_path[1].split('/').collect::<Vec<&str>>()[2];
-
-            let mut file = File::open(self.bookmarks_path(bookmarker)).unwrap();
-            let mut hash = String::new();
-            file.read_to_string(&mut hash).unwrap();
+            let hash = file_system::read_contet_with_string(self.bookmarks_path(bookmarker))?;
 
             return self.read_object(hash);
         }
@@ -119,55 +105,37 @@ impl NssRepository {
     }
 
     pub fn write_index(&self, index: Index) -> Result<()> {
-        let mut file = File::create(self.index_path())?;
-        file.write_all(&index.as_bytes())?;
-        file.flush()?;
+        file_system::create_file_with_buffer(self.index_path(), &index.as_bytes())?;
 
         Ok(())
     }
 
     pub fn read_index(&self) -> Result<Index> {
-        // read index
-        let mut file = File::open(self.index_path()).with_context(|| "First index!")?;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
-            .with_context(|| "Index can't be read. Reset all!")?;
+        let bytes = file_system::read_contet_with_bytes(self.index_path())?;
 
         Index::from_rawindex(bytes)
     }
 
-    pub fn write_object<H>(&self, object: H) -> Result<()>
-    where
-        H: Hashable,
-    {
+    pub fn write_object<H: Hashable>(&self, object: H) -> Result<()> {
         let object_path = self.objects_path(hex::encode(object.to_hash()));
         file_system::create_dir(object_path.parent().unwrap())?;
 
+        // Encode
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&object.as_bytes())?;
         let compressed = encoder.finish()?;
 
-        let mut file = File::create(object_path)?;
-        file.write_all(&compressed)?;
-        file.flush().unwrap();
+        file_system::create_file_with_buffer(object_path, &compressed)?;
 
         Ok(())
     }
 
-    pub fn read_object<S>(&self, hash: S) -> Result<Object>
-    where
-        S: AsRef<str>,
-    {
+    pub fn read_object<S: AsRef<str>>(&self, hash: S) -> Result<Object> {
         let hash_path = self.try_get_objects_path(hash.as_ref())?;
 
-        // read objectz
-        let mut file = File::open(hash_path)
-            .with_context(|| format!("{} doesn't exit in this repository", hash.as_ref()))?;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
-            .with_context(|| format!("{} content can't read", &hash.as_ref()))?;
+        let bytes = file_system::read_contet_with_bytes(hash_path)?;
 
-        // decode content
+        // Decode
         let mut decoder = ZlibDecoder::new(&bytes[..]);
         let mut object_content: Vec<u8> = Vec::new();
         decoder.read_to_end(&mut object_content)?;
@@ -180,7 +148,7 @@ impl NssRepository {
         let hash = hash.into();
 
         if hash.len() < 6 {
-            bail!("More hash value digit (less digit)")
+            bail!(ObjectError::LessObjectHash)
         }
 
         let (dir, file) = hash.split_at(2);
@@ -197,9 +165,9 @@ impl NssRepository {
         }
 
         if target_files.len() > 2 {
-            bail!("More hash value digit (nearly hash value exists)")
+            bail!(ObjectError::CannotSpecifyHash)
         } else if target_files.is_empty() {
-            bail!("Doesn't exit in this repository")
+            bail!(ObjectError::NotFoundObject)
         }
 
         Ok(object_dir.join(&target_files[0]))
@@ -221,21 +189,6 @@ impl NssRepository {
         paths.sort();
 
         Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub fn get_all_paths(&self, target: &PathBuf) -> Result<Vec<PathBuf>> {
-        let mut paths = vec![];
-        self.ext_paths(target, paths.as_mut())?;
-
-        Ok(paths)
-    }
-
-    pub fn get_all_paths_ignore<P: AsRef<Path>>(&self, target: P) -> Vec<PathBuf> {
-        let mut paths = vec![];
-        self.ext_paths_ignore(target, paths.as_mut());
-
-        paths
     }
 
     pub fn ext_paths_ignore<P: AsRef<Path>>(&self, target: P, paths: &mut Vec<PathBuf>) {
@@ -283,16 +236,39 @@ impl NssRepository {
         }
         paths.sort();
     }
+
+    #[allow(dead_code)]
+    pub fn get_all_paths(&self, target: &PathBuf) -> Result<Vec<PathBuf>> {
+        let mut paths = vec![];
+        self.ext_paths(target, paths.as_mut())?;
+
+        Ok(paths)
+    }
+
+    pub fn get_all_paths_ignore<P: AsRef<Path>>(&self, target: P) -> Vec<PathBuf> {
+        let mut paths = vec![];
+        self.ext_paths_ignore(target, paths.as_mut());
+
+        paths
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repo::config::*;
+
     use std::env;
+    use std::fs;
+    use std::fs::File;
+    use testdir::testdir;
 
     #[test]
     fn test_nss_repository() {
-        let temp_dir = env::temp_dir();
+        // Create a temporary directory for testing
+        let temp_dir = testdir! {};
+        println!("Test Directory: {}", temp_dir.display());
+
         let repository = NssRepository::new(temp_dir.clone());
 
         assert_eq!(repository.path(), temp_dir);
@@ -319,5 +295,125 @@ mod tests {
         );
         assert_eq!(repository.head_path(), temp_dir.join(".nss").join("HEAD"));
         assert_eq!(repository.index_path(), temp_dir.join(".nss").join("INDEX"));
+    }
+
+    #[test]
+    fn test_write_config() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir! {};
+        println!("Test Directory: {}", temp_dir.display());
+
+        let repository = NssRepository::new(temp_dir.clone());
+        fs::create_dir_all(repository.path().join(".nss")).unwrap();
+        File::create(repository.config_path()).unwrap();
+
+        // New config
+        let user = User::new(
+            "noshishi".to_string(),
+            Some("nopenoshishi@gmail.com".to_string()),
+        );
+        let config = Config::new(user);
+        let config_contet = "[user]
+name = \"noshishi\"
+email = \"nopenoshishi@gmail.com\"
+";
+
+        let result = repository.write_config(config);
+        assert!(result.is_ok());
+
+        let config_path = repository.config_path();
+        let mut file = File::open(config_path).unwrap();
+        let mut content = String::new();
+        file.read_to_string(&mut content).unwrap();
+
+        assert_eq!(config_contet, content);
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_read_config() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir! {};
+        println!("Test Directory: {}", temp_dir.display());
+
+        let repository = NssRepository::new(temp_dir.clone());
+        fs::create_dir_all(repository.path().join(".nss")).unwrap();
+
+        let test_file = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_config")
+            .join("config");
+        fs::copy(&test_file, &repository.path().join(".nss").join("config")).unwrap();
+
+        let result = repository.read_config();
+        assert!(result.is_ok());
+
+        let test_user = User::new(
+            "noshishi".to_string(),
+            Some("nopenoshishi@gmail.com".to_string()),
+        );
+        let test_config = Config::new(test_user);
+
+        assert_eq!(result.unwrap(), test_config);
+    }
+
+    #[test]
+    fn test_write_head() {}
+
+    #[test]
+    fn test_read_head() {}
+
+    #[test]
+    fn test_write_index() {}
+
+    #[test]
+    fn test_read_index() {}
+
+    #[test]
+    fn test_write_object() {}
+
+    #[test]
+    fn test_read_object() {}
+
+    #[test]
+    fn test_try_get_objects_path() {}
+
+    #[test]
+    fn test_ext_paths() {}
+
+    #[test]
+    fn test_ext_paths_ignore() {}
+
+    #[test]
+    fn test_get_all_paths() {}
+
+    #[test]
+    fn test_get_all_paths_ignore() {}
+
+    #[test]
+    fn test_repository_debug() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir! {};
+        println!("Test Directory: {}", temp_dir.display());
+
+        let repository = NssRepository::new(temp_dir.clone());
+
+        let debug = format!("{:?}", repository);
+
+        let test_debug = format!("NssRepository {{ root: \"{}\" }}", temp_dir.display());
+
+        assert_eq!(debug, test_debug);
+    }
+
+    #[test]
+    fn test_repository_clone() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir! {};
+        println!("Test Directory: {}", temp_dir.display());
+
+        let repository = NssRepository::new(temp_dir.clone());
+
+        assert_eq!(repository.root, temp_dir);
     }
 }

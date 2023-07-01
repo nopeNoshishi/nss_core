@@ -4,16 +4,10 @@ use std::path::Path;
 // External
 use anyhow::{bail, Result};
 use sha1::{Digest, Sha1};
-use thiserror::Error;
 
 // Internal
 use super::{Blob, Commit, Tree};
-
-#[derive(Error, Debug)]
-enum ObjectError {
-    #[error("No existed path!")]
-    NotFoundPath,
-}
+use crate::error::*;
 
 /// **Object Enum**
 ///

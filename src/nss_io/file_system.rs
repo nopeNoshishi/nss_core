@@ -1,5 +1,3 @@
-// TODO: 読み書きが発生する部分はここにまとめる
-
 // Std
 use std::fs;
 use std::fs::OpenOptions;
@@ -9,6 +7,22 @@ use std::path::{Path, PathBuf};
 // External
 use anyhow::{bail, Result};
 use dirs::home_dir;
+
+pub fn read_contet_with_string<P: AsRef<Path>>(file_path: P) -> Result<String> {
+    let mut file = OpenOptions::new().read(true).open(file_path)?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)?;
+
+    Ok(content)
+}
+
+pub fn read_contet_with_bytes<P: AsRef<Path>>(file_path: P) -> Result<Vec<u8>> {
+    let mut file = OpenOptions::new().read(true).open(file_path)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+
+    Ok(bytes)
+}
 
 pub fn open_file_trucate<P: AsRef<Path>>(file_path: P, buffer: &[u8]) -> std::io::Result<()> {
     let mut file = OpenOptions::new()
@@ -68,9 +82,134 @@ pub fn exists_repo<P: AsRef<Path>>(repo_dir: Option<P>) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::env;
     use std::fs;
+    use std::fs::File;
     use std::io::Read;
     use testdir::testdir;
+
+    #[test]
+    fn test_read_contet_with_string() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+
+        fs::copy(test_file_root, temp_dir.join("first.rs")).unwrap();
+
+        // Existed
+        let result = read_contet_with_string(temp_dir.join("first.rs"));
+        assert!(result.is_ok());
+
+        let test_content = "#[allow(dead_code)]
+fn commit(message: &str) -> std::io::Result<()> {
+    let tree_hash = write_tree()?;
+    match commit_tree(&tree_hash, message)? {
+        Some(c) => update_ref(&c)?,
+        _ => println!(\"Nothing to commit\")
+    };
+
+    Ok(())
+}";
+
+        assert_eq!(result.unwrap(), test_content);
+
+        // No existed
+        let result = read_contet_with_string(&temp_dir.join("second.rs"));
+        assert!(result.is_err());
+
+        // Directory
+        let result = read_contet_with_string(&temp_dir);
+        assert!(result.is_err());
+
+        // Clean up: Remove the test dir
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_read_contet_with_bytes() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+
+        fs::copy(test_file_root, temp_dir.join("first.rs")).unwrap();
+
+        // Existed
+        let result = read_contet_with_bytes(temp_dir.join("first.rs"));
+        assert!(result.is_ok());
+
+        let test_content = b"#[allow(dead_code)]
+fn commit(message: &str) -> std::io::Result<()> {
+    let tree_hash = write_tree()?;
+    match commit_tree(&tree_hash, message)? {
+        Some(c) => update_ref(&c)?,
+        _ => println!(\"Nothing to commit\")
+    };
+
+    Ok(())
+}";
+
+        assert_eq!(result.unwrap(), test_content);
+
+        // No existed
+        let result = read_contet_with_bytes(temp_dir.join("second.rs"));
+        assert!(result.is_err());
+
+        // Directory
+        let result = read_contet_with_bytes(&temp_dir);
+        assert!(result.is_err());
+
+        // Clean up: Remove the test dir
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_open_file_trucate() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_config")
+            .join("config");
+
+        fs::copy(test_file_root, temp_dir.join("config")).unwrap();
+
+        let test_content = "[user]
+name = \"nopipi\"
+";
+
+        // Existed
+        let result = open_file_trucate(temp_dir.join("config"), test_content.as_bytes());
+        assert!(result.is_ok());
+
+        let mut file = OpenOptions::new()
+            .read(true)
+            .open(temp_dir.join("config"))
+            .unwrap();
+        let mut content = String::new();
+        file.read_to_string(&mut content).unwrap();
+
+        assert_eq!(content, test_content);
+
+        // No existed
+        let result = open_file_trucate(temp_dir.join("config2"), test_content.as_bytes());
+        assert!(result.is_err());
+
+        // Clean up: Remove the test dir
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
 
     #[test]
     fn test_create_file_with_buffer() {
@@ -117,6 +256,64 @@ mod tests {
 
         // Clean up: Remove the test dir
         fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_remove_file() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+
+        fs::copy(test_file_root, temp_dir.join("first.rs")).unwrap();
+
+        // Existed
+        let result = remove_file(temp_dir.join("first.rs"));
+        assert!(result.is_ok());
+
+        let oepn_result = File::open(temp_dir.join("first.rs"));
+        assert!(oepn_result.is_err());
+
+        // No existed
+        let result = remove_file(temp_dir.join("second.rs"));
+        assert!(result.is_err());
+
+        // Clean up: Remove the test dir
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_remove_dir_all() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+        let test_file2_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("second.rs");
+
+        fs::copy(test_file_root, temp_dir.join("first.rs")).unwrap();
+        fs::copy(test_file2_root, temp_dir.join("second.rs")).unwrap();
+
+        // Existed
+        let result = remove_dir_all(&temp_dir);
+        assert!(result.is_ok());
+
+        let oepn_result = File::open(temp_dir.join("first.rs"));
+        assert!(oepn_result.is_err());
+
+        // No existed
+        let result = remove_file(temp_dir);
+        assert!(result.is_err());
     }
 
     #[test]

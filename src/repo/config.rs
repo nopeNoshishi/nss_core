@@ -115,4 +115,27 @@ email = "noshishi@nope.com"
         let test_config = Config::new(test_user);
         assert_eq!(result.unwrap(), test_config);
     }
+
+    #[test]
+    fn test_user_debug() {
+        let user = User::new("noshishi".to_string(), None);
+
+        let debug = format!("{:?}", user);
+
+        let test_debug = "User { name: \"noshishi\", email: None }";
+
+        assert_eq!(debug, test_debug);
+    }
+
+    #[test]
+    fn test_config_debug() {
+        let user = User::new("noshishi".to_string(), None);
+        let config = Config::new(user);
+
+        let debug = format!("{:?}", config);
+
+        let test_debug = "Config { user: User { name: \"noshishi\", email: None } }";
+
+        assert_eq!(debug, test_debug);
+    }
 }

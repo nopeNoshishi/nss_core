@@ -9,7 +9,7 @@ use super::object::Hashable;
 /// **Commit Struct**
 ///
 /// This struct represents ...
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Commit {
     pub tree_hash: String,
     pub parent: String,
@@ -122,16 +122,89 @@ impl Hashable for Commit {
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::*;
 
     #[test]
-    fn test_commit_new() {}
+    fn test_commit_new() {
+        let result = Commit::new(
+            "c192349d0ee530038e5d925fdd701652ca755ba8",
+            "a02b83cb54ba139e5c9d623a2fcf5424552946e0",
+            "nopeNoshihsi",
+            "nopeNoshihsi",
+            "initial",
+        );
+        assert!(result.is_ok());
+
+        let commit = result.unwrap();
+        let time = commit.date;
+
+        let test_commit = Commit {
+            tree_hash: "c192349d0ee530038e5d925fdd701652ca755ba8".to_string(),
+            parent: "a02b83cb54ba139e5c9d623a2fcf5424552946e0".to_string(),
+            author: "nopeNoshihsi".to_string(),
+            committer: "nopeNoshihsi".to_string(),
+            date: time,
+            message: "initial".to_string(),
+        };
+
+        assert_eq!(commit, test_commit);
+    }
 
     #[test]
-    fn test_commit_from_rawobject() {}
+    fn test_commit_from_rawobject() {
+        // Create a sample content as bytes
+        let content = b"tree c192349d0ee530038e5d925fdd701652ca755ba8
+parent a02b83cb54ba139e5c9d623a2fcf5424552946e0
+author nopeNoshihsi
+committer nopeNoshihsi
+date 1687619045
+
+initial
+";
+
+        // Create a Commit from the raw object content
+        let commit = Commit::from_rawobject(content).unwrap();
+
+        // Verify the Commit instance's properties
+        let test_commit = Commit {
+            tree_hash: "c192349d0ee530038e5d925fdd701652ca755ba8".to_string(),
+            parent: "a02b83cb54ba139e5c9d623a2fcf5424552946e0".to_string(),
+            author: "nopeNoshihsi".to_string(),
+            committer: "nopeNoshihsi".to_string(),
+            date: Utc.timestamp_opt(1687619045, 0).unwrap(),
+            message: "initial".to_string(),
+        };
+
+        assert_eq!(commit, test_commit);
+    }
 
     #[test]
-    fn test_commit_as_bytes() {}
+    fn test_commit_as_bytes() {
+        let time = Utc.timestamp_opt(1687619045, 0).unwrap();
+        let commit = Commit {
+            tree_hash: "c192349d0ee530038e5d925fdd701652ca755ba8".to_string(),
+            parent: "a02b83cb54ba139e5c9d623a2fcf5424552946e0".to_string(),
+            author: "nopeNoshihsi".to_string(),
+            committer: "nopeNoshihsi".to_string(),
+            date: time,
+            message: "initial".to_string(),
+        };
+
+        let content = commit.as_bytes();
+
+        let test_content = b"commit 162\0tree c192349d0ee530038e5d925fdd701652ca755ba8
+parent a02b83cb54ba139e5c9d623a2fcf5424552946e0
+author nopeNoshihsi
+committer nopeNoshihsi
+date 1687619045
+
+initial
+";
+        assert_eq!(content, test_content);
+    }
+
+    #[test]
+    fn test_commit_to_hash() {}
 
     #[test]
     fn test_commit_display() {}

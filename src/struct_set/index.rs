@@ -5,14 +5,15 @@ use std::path::{Path, PathBuf};
 // External
 use anyhow::{bail, Result};
 use byteorder::{BigEndian, ByteOrder};
-use serde::{Deserialize, Serialize};
+// TODO use serde::{Deserialize, Serialize};
 
 // Internal
 use super::{Blob, FileMeta, Hashable, Object, Tree};
 use crate::nss_io::file_system;
 use crate::repo::repository::NssRepository;
+use crate::repo::error::*;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Index {
     pub version: u32,
     pub filemetas: Vec<FileMeta>,
@@ -32,7 +33,7 @@ impl Index {
 
         let filemetas = all_paths
             .iter()
-            .map(|path| FileMeta::new(path).unwrap())
+            .map(|path| FileMeta::new(repository, path).unwrap())
             .collect::<Vec<_>>();
 
         Ok(Self {
@@ -41,13 +42,15 @@ impl Index {
         })
     }
 
-    pub fn add<P>(&mut self, file_path: P, temp_prefix: Option<P>) -> Result<()>
-    where
-        P: AsRef<Path>,
-    {
+    pub fn add<P: AsRef<Path>>(
+        &mut self,
+        repository: &NssRepository,
+        file_path: P,
+        temp_prefix: Option<P>,
+    ) -> Result<()> {
         let add_filemeta = match temp_prefix {
             Some(p) => FileMeta::new_temp(file_path, p)?,
-            None => FileMeta::new(file_path)?,
+            None => FileMeta::new(repository, file_path)?,
         };
 
         let mut new_filemetas: Vec<FileMeta> = vec![];
@@ -79,7 +82,7 @@ impl Index {
             file_system::create_dir(path.parent().unwrap())?;
             file_system::create_file_with_buffer(&path, &blob.content)?;
 
-            index.add(path, Some(temp_dir.clone()))?;
+            index.add(repository, path, Some(temp_dir.clone()))?;
         }
 
         file_system::remove_dir_all(temp_dir)?;
@@ -108,14 +111,14 @@ fn push_paths(
         if entry.as_type() == "blob" {
             let blob = match repository.read_object(hex::encode(&entry.hash))? {
                 Object::Blob(b) => b,
-                _ => bail!("{} is not blob hash", hex::encode(entry.hash)),
+                _ => bail!(ObjectError::DontMatchType("Blob".to_string(), hex::encode(entry.hash))),
             };
             path_blob.insert(path, blob);
         } else {
             let hash = hex::encode(entry.hash);
             let sub_tree = match repository.read_object(&hash)? {
                 Object::Tree(t) => t,
-                _ => bail!("{} is not tree hash", hash),
+                _ => bail!(ObjectError::DontMatchType("Tree".to_string(), hash)),
             };
 
             push_paths(repository, path_blob, sub_tree, &path)?
@@ -183,32 +186,40 @@ impl IndexVesion1 for Index {
 }
 
 // TEST FEATURE！
-pub trait IndexVesion2 {
-    fn as_bytes(&self) -> bincode::Result<Vec<u8>>;
-    fn from_rawindex(buf: Vec<u8>) -> bincode::Result<Self>
-    where
-        Self: Sized;
-}
+// pub trait IndexVesion2 {
+//     fn as_bytes(&self) -> bincode::Result<Vec<u8>>;
+//     fn from_rawindex(buf: Vec<u8>) -> bincode::Result<Self>
+//     where
+//         Self: Sized;
+// }
 
-impl IndexVesion2 for Index {
-    fn as_bytes(&self) -> bincode::Result<Vec<u8>>
-    where
-        Self: Serialize,
-    {
-        bincode::serialize(self)
-    }
+// impl IndexVesion2 for Index {
+//     fn as_bytes(&self) -> bincode::Result<Vec<u8>>
+//     where
+//         Self: Serialize,
+//     {
+//         bincode::serialize(self)
+//     }
 
-    fn from_rawindex(buf: Vec<u8>) -> bincode::Result<Self> {
-        bincode::deserialize(&buf)
-    }
-}
+//     fn from_rawindex(buf: Vec<u8>) -> bincode::Result<Self> {
+//         bincode::deserialize(&buf)
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::*;
 
     #[test]
-    fn test_index_empty() {}
+    fn test_index_empty() {
+        let empty_index = Index::empty();
+        let test_index = Index {
+            version: 1,
+            filemetas: vec![],
+        };
+
+        assert_eq!(empty_index, test_index);
+    }
 
     #[test]
     fn test_index_new_all() {}

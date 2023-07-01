@@ -1,21 +1,19 @@
 // Std
-use std::fs::File;
-use std::io::prelude::*;
 use std::path::Path;
 
 // External
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+// TODO: use serde::{Deserialize, Serialize};
 
 // Internal
+use crate::nss_io::file_system;
 use crate::struct_set::Hashable;
 
 /// **Blob Struct**
 ///
 /// This struct represents a file object.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Blob {
-    #[serde(with = "serde_bytes")]
     pub content: Vec<u8>,
 }
 
@@ -24,9 +22,7 @@ impl Blob {
     ///
     /// This path must be in the working directory.
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let mut file = File::open(path.as_ref())?;
-        let mut content: Vec<u8> = Vec::new();
-        file.read_to_end(&mut content)?;
+        let content = file_system::read_contet_with_bytes(path.as_ref())?;
 
         Ok(Self { content })
     }
@@ -59,8 +55,10 @@ impl Hashable for Blob {
 mod tests {
     use super::*;
     use std::env;
+
     use std::fs;
     use std::fs::File;
+    use std::io::prelude::*;
 
     #[test]
     fn test_blob_new() {
@@ -185,9 +183,31 @@ fn commit(message: &str) -> std::io::Result<()> {
         };
 
         // Format the Blob for display
-        let display = format!("{}", blob);
+        let display = format!("{}", blob.to_string());
 
         // Verify the formatted display string
         assert_eq!(display, "Hello, world!");
+    }
+
+    #[test]
+    fn test_blob_debug() {
+        let blob = Blob {
+            content: b"hellow".to_vec(),
+        };
+
+        let debug = format!("{:?}", blob);
+
+        let test_debug = "Blob { content: [104, 101, 108, 108, 111, 119] }";
+
+        assert_eq!(debug, test_debug)
+    }
+
+    #[test]
+    fn test_blob_clone() {
+        let blob = Blob {
+            content: b"hellow".to_vec(),
+        };
+
+        assert_eq!(blob, blob.clone())
     }
 }

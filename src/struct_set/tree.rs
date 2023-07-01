@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 // External
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+// TODO: use serde::{Deserialize, Serialize};
 
 // Internal
 use super::{FileMeta, Hashable, Object};
@@ -15,7 +15,7 @@ use super::{FileMeta, Hashable, Object};
 /// This struct contains blob( or tree) object's mode, name, hash.
 /// Since blob and tree do not know their own names, it is necessary
 /// to string them together in this structure.
-#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Entry {
     pub mode: u32,
     pub name: OsString,
