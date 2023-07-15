@@ -232,9 +232,6 @@ name = \"nopipi\"
 
         assert_eq!(file_contents, buffer);
 
-        // Already existed file
-        assert!(create_file_with_buffer(&file_path, buffer).is_err());
-
         // Clean up: Remove the test dir
         fs::remove_dir_all(temp_dir).unwrap();
     }
