@@ -11,7 +11,7 @@ pub enum ObjectError {
     #[error("Need more hash value digit (nearly hash value exists)")]
     CannotSpecifyHash,
     #[error("{0} is not {1} hash")]
-    DontMatchType(String, String)
+    DontMatchType(String, String),
 }
 
 mod tests {
@@ -35,7 +35,8 @@ mod tests {
         println!("{:?}", cant_specify_hash);
         println!("{}", cant_specify_hash);
 
-        let dont_match_type = ObjectError::DontMatchType("Blob".to_string(), "fqf89q3fauqp3g23g32g".to_string());
+        let dont_match_type =
+            ObjectError::DontMatchType("Blob".to_string(), "fqf89q3fauqp3g23g32g".to_string());
         println!("{:?}", dont_match_type);
         println!("{}", dont_match_type);
     }

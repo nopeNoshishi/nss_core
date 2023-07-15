@@ -10,9 +10,9 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 
 use crate::config::Config;
+use crate::error::*;
 use crate::nss_io::file_system;
 use crate::struct_set::{Hashable, Index, IndexVesion1, Object};
-use crate::error::*;
 
 // Manager for repository absolute path
 #[derive(Debug, Clone)]
@@ -105,7 +105,7 @@ impl NssRepository {
     }
 
     pub fn write_index(&self, index: Index) -> Result<()> {
-        file_system::create_file_with_buffer(self.index_path(), &index.as_bytes())?;
+        file_system::open_file_trucate(self.index_path(), &index.as_bytes())?;
 
         Ok(())
     }
@@ -208,7 +208,7 @@ impl NssRepository {
                         .map(|line| self.path().join(line)),
                 );
             }
-            Err(..) => println!("You may set ignore file."),
+            Err(..) => (),
         }
 
         // Program ignore folder

@@ -23,9 +23,6 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// Create entry with the path.
-    ///
-    /// This path must be in the working directory.
     pub fn new<P: AsRef<Path>>(path: P, object: Object) -> Result<Self> {
         let metadata = path.as_ref().metadata()?;
         let mode = metadata.mode();
@@ -281,7 +278,6 @@ mod tests {
         );
     }
 
-    // TODO: Test
     #[test]
     fn test_entry_group_new() {
         // Create a temporary directory for testing
@@ -289,12 +285,39 @@ mod tests {
         println!("Test Directory: {}", temp_dir.display());
 
         // Create a temporary file for testing
-        let temp_file = temp_dir.join("first.rs");
-        let test_file = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+        let temp_file1 = temp_dir.join("first.rs");
+        let test_file1 = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
             .join("tests")
             .join("test_repo")
             .join("first.rs");
-        fs::copy(&test_file, &temp_file).unwrap();
+        fs::copy(&test_file1, &temp_file1).unwrap();
+
+        let temp_file2 = temp_dir.join("second.rs");
+        let test_file2 = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("second.rs");
+        fs::copy(&test_file2, &temp_file2).unwrap();
+
+        // Vec entries
+        let object1 = Object::new(&temp_file1).unwrap();
+        let entry1 = Entry::new(&temp_file1, object1).unwrap();
+        let object2 = Object::new(&temp_file2).unwrap();
+        let entry2 = Entry::new(&temp_file2, object2).unwrap();
+
+        let entries = vec![entry1, entry2];
+
+        let result = Entry::new_group(&temp_dir, entries);
+
+        assert!(result.is_ok());
+
+        let entry = result.unwrap();
+        assert_eq!(entry.mode, 0o040755);
+        assert_eq!(entry.name, OsString::from("test_entry_group_new"));
+        assert_eq!(
+            hex::encode(entry.hash),
+            "e6cc44b0e9902bb5f81ec384dc92093df7ecf36d"
+        );
 
         // Clean up: Remove the test dir
         fs::remove_dir_all(temp_dir).unwrap();
@@ -302,20 +325,12 @@ mod tests {
 
     #[test]
     fn test_from_rawobject() {
-        // Create a temporary directory for testing
-        let temp_dir = testdir!();
-        println!("Test Directory: {}", temp_dir.display());
+        // let meta = b"<this file relative path>";
+        // let hash_next = b"<next file mode> <next file relative path>";
 
-        // Create a temporary file for testing
-        let temp_file = temp_dir.join("first.rs");
-        let test_file = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
-            .join("tests")
-            .join("test_repo")
-            .join("first.rs");
-        fs::copy(&test_file, &temp_file).unwrap();
-
+        // let cont = b"33188 first.rs\x00\\s\x00\x8b\xa7Us\xc2\rj\x8anU}\x05V\xd4\xa8A333188 second.rs\x00xj\xc6%\x91\xa38\xfc\xebv)RkW\x8bq\x0f\xca\x01";
         // Clean up: Remove the test dir
-        fs::remove_dir_all(temp_dir).unwrap();
+        // fs::remove_dir_all(temp_dir).unwrap();
     }
 
     #[test]

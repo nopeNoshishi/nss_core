@@ -36,7 +36,8 @@ pub fn open_file_trucate<P: AsRef<Path>>(file_path: P, buffer: &[u8]) -> std::io
 pub fn create_file_with_buffer<P: AsRef<Path>>(file_path: P, buffer: &[u8]) -> std::io::Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
-        .create_new(true)
+        .create(true)
+        .truncate(true)
         .open(file_path)?;
 
     file.write_all(buffer)

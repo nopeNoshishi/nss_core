@@ -1,4 +1,5 @@
 // Std
+use std::ffi::OsString;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -8,10 +9,10 @@ use byteorder::{BigEndian, ByteOrder};
 // TODO use serde::{Deserialize, Serialize};
 
 // Internal
-use super::{Blob, FileMeta, Hashable, Object, Tree};
+use super::{Blob, FileMeta, Hashable, Object, Tree, Diff, DIffTag};
 use crate::nss_io::file_system;
-use crate::repo::repository::NssRepository;
 use crate::repo::error::*;
+use crate::repo::repository::NssRepository;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Index {
@@ -111,7 +112,10 @@ fn push_paths(
         if entry.as_type() == "blob" {
             let blob = match repository.read_object(hex::encode(&entry.hash))? {
                 Object::Blob(b) => b,
-                _ => bail!(ObjectError::DontMatchType("Blob".to_string(), hex::encode(entry.hash))),
+                _ => bail!(ObjectError::DontMatchType(
+                    "Blob".to_string(),
+                    hex::encode(entry.hash)
+                )),
             };
             path_blob.insert(path, blob);
         } else {
@@ -206,9 +210,45 @@ impl IndexVesion1 for Index {
 //     }
 // }
 
+impl Diff<Index, OsString> for Index {
+    fn diff(&self, vs: Index) -> Vec<(DIffTag, OsString)> {
+
+        let mut changes = Vec::new();
+
+        let new_metas: HashMap<OsString, Vec<u8>> = self.filemetas.iter().map(|f| (f.filename.clone(), f.hash.clone())).collect();
+        let old_metas: HashMap<OsString, Vec<u8>> = vs.filemetas.iter().map(|f| (f.filename.clone(), f.hash.clone())).collect();
+
+        old_metas.iter().for_each(|(k, v)| {
+            if !new_metas.contains_key(k) {
+                changes.push((DIffTag::Delete, k.clone()))
+            } else {
+                if new_metas.get(k) == Some(v) {
+                    changes.push((DIffTag::Equal, k.clone()))
+                } else {
+                    changes.push((DIffTag::Replace, k.clone()))
+                }
+            }
+        });
+
+        new_metas.iter().for_each(|(k, _v)| {
+            if !old_metas.contains_key(k) {
+                changes.push((DIffTag::Insert, k.clone()))
+            }
+        });
+        
+        changes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+
+    use testdir::testdir;
 
     #[test]
     fn test_index_empty() {
@@ -244,4 +284,55 @@ mod tests {
 
     #[test]
     fn test_to_tree() {}
+
+    #[test]
+    fn test_index_diff() {
+        // Create a temporary directory for testing
+        let temp_dir = testdir!();
+        fs::create_dir(temp_dir.join("sub")).unwrap();
+        println!("Test Directory: {}", temp_dir.display());
+
+        let test_file_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("first.rs");
+        let test_file_root2 = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo")
+            .join("second.rs");
+        let test_file_root3 = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("tests")
+            .join("test_repo2")
+            .join("first.rs");
+
+        let repository = NssRepository::new(temp_dir.clone());
+        fs::copy(test_file_root, repository.path().join("first.rs")).unwrap();
+        fs::copy(test_file_root2, repository.path().join("second.rs")).unwrap();
+
+        let repository2 = NssRepository::new(temp_dir.join("sub").clone());
+        fs::copy(test_file_root3, repository2.path().join("first.rs")).unwrap();
+
+        // Rqw content
+        let test_filemeta1 =
+            FileMeta::new(&repository, repository.path().join("first.rs")).unwrap();
+        let test_filemeta2 =
+            FileMeta::new(&repository, repository.path().join("second.rs")).unwrap();
+
+        let test_filemeta3 =
+            FileMeta::new(&repository2, repository2.path().join("first.rs")).unwrap();
+
+        let mut index1 = Index::empty();
+        index1.filemetas.push(test_filemeta1);
+        
+        let mut index2 = Index::empty();
+        index2.filemetas.push(test_filemeta2);
+        index2.filemetas.push(test_filemeta3);
+
+        let change = index1.diff(index2);
+
+        for c in change {
+            println!("{:?} {:?}", c.0, c.1);
+        }
+
+    }
 }
