@@ -5,9 +5,16 @@ edition = "2021"
 rust-version = "1.69"
 authors = ["noshishi"]
 readme = "README.md"
+description = "nssi core logic"
+repository = "https://github.com/nopeNoshishi/nss_core"
+license = "MIT"
+categories = ["command-line-utilities"]
+exclude = ["/tests"]
+include = ["/src"]
+publish = true
 
 [badges]
-github = { repository = "nopeNoshishi/nss", workflow = "Rust" }
+github = { repository = "nopeNoshishi/nss_core", workflow = "Rust" }
 
 [dependencies]
 anyhow = "1"
