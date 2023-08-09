@@ -81,7 +81,7 @@ impl Index {
         // Tempolary create file -> filemeta
         for (path, blob) in path_blob {
             file_system::create_dir(path.parent().unwrap())?;
-            file_system::create_file_with_buffer(&path, &blob.content)?;
+            file_system::create_new_with_buffer(&path, &blob.content)?;
 
             index.add(repository, path, Some(temp_dir.clone()))?;
         }

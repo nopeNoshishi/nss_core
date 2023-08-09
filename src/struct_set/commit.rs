@@ -12,7 +12,7 @@ use super::object::Hashable;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Commit {
     pub tree_hash: String,
-    pub parent: String,
+    pub parents: Vec<String>,
     pub author: String,
     pub committer: String,
     pub date: DateTime<Utc>,
@@ -25,14 +25,14 @@ impl Commit {
     /// This tree_hash must be in the database.
     pub fn new<S: Into<String>>(
         tree_hash: S,
-        parent: S,
+        parents: Vec<String>,
         author: S,
         committer: S,
         message: S,
     ) -> Result<Self> {
         Ok(Self {
             tree_hash: tree_hash.into(),
-            parent: parent.into(),
+            parents: parents,
             author: author.into(),
             committer: committer.into(),
             date: Utc::now(),
@@ -47,32 +47,30 @@ impl Commit {
             .map(|x| String::from_utf8(x.to_vec()).unwrap())
             .collect::<Vec<String>>();
 
-        // TODO: Refactor！
-        let mut iter = all_line[0].split_whitespace();
-        iter.next();
-        let tree_hash = iter.next().unwrap().to_string();
+        let mut tree_hash = String::new();
+        let mut parents: Vec<String> = Vec::new();
+        let mut author = String::new();
+        let mut committer = String::new();
+        let mut date = String::new();
+        let mut message = String::new();
 
-        let mut iter = all_line[1].split_whitespace();
-        iter.next();
-        let parent = iter.next().unwrap().to_string();
+        all_line.iter().for_each(|l| {
+            let mut split = l.split_whitespace();
 
-        let mut iter = all_line[2].split_whitespace();
-        iter.next();
-        let author = iter.next().unwrap().to_string();
+            match split.next().unwrap() {
+                "tree" => tree_hash = split.next().unwrap().to_string(),
+                "parent" => parents.push(split.next().unwrap().to_string()),
+                "author" => author = split.next().unwrap().to_string(),
+                "committer" => committer = split.next().unwrap().to_string(),
+                "date" => date = split.next().unwrap().to_string(),
+                s => message = s.to_string(),
+            }
 
-        let mut iter = all_line[3].split_whitespace();
-        iter.next();
-        let committer = iter.next().unwrap().to_string();
-
-        let mut iter = all_line[4].split_whitespace();
-        iter.next();
-        let date = iter.next().unwrap().to_string();
-
-        let message = all_line[5].clone();
+        });
 
         Ok(Self {
             tree_hash,
-            parent,
+            parents,
             author,
             committer,
             date: Utc.timestamp_opt(date.parse::<i64>()?, 0).unwrap(),
@@ -84,10 +82,10 @@ impl Commit {
 impl std::fmt::Display for Commit {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let tree = format!("tree {}", self.tree_hash);
-        let parent = match self.parent.as_str() {
-            "None" => "parent None\n".to_string(),
-            _ => format!("parent {}\n", self.parent),
-        };
+        let parents: String = self.parents
+            .iter()
+            .map(|s| format!("parent {}\n", s))
+            .collect();
         let author = format!("author {}", self.author);
         let committer = format!("committer {}", self.committer);
         let date = format!("date {}", self.date.timestamp());
@@ -95,7 +93,7 @@ impl std::fmt::Display for Commit {
         write!(
             f,
             "{}\n{}{}\n{}\n{}\n\n{}\n",
-            tree, parent, author, committer, date, self.message
+            tree, parents, author, committer, date, self.message
         )
     }
 }
@@ -103,16 +101,16 @@ impl std::fmt::Display for Commit {
 impl Hashable for Commit {
     fn as_bytes(&self) -> Vec<u8> {
         let tree_hash = format!("tree {}", self.tree_hash);
-        let parent = match self.parent.as_str() {
-            "None" => "parent None\n".to_string(),
-            _ => format!("parent {}\n", self.parent),
-        };
+        let parents: String = self.parents
+            .iter()
+            .map(|s| format!("parent {}\n", s))
+            .collect();
         let author = format!("author {}", self.author);
         let committer = format!("committer {}", self.committer);
         let date = format!("date {}", self.date.timestamp());
         let content = format!(
             "{}\n{}{}\n{}\n{}\n\n{}\n",
-            tree_hash, parent, author, committer, date, self.message
+            tree_hash, parents, author, committer, date, self.message
         );
         let store = format!("commit {}\0{}", content.len(), content);
 
@@ -128,7 +126,7 @@ mod tests {
     fn test_commit_new() {
         let result = Commit::new(
             "c192349d0ee530038e5d925fdd701652ca755ba8",
-            "a02b83cb54ba139e5c9d623a2fcf5424552946e0",
+            vec!["a02b83cb54ba139e5c9d623a2fcf5424552946e0".to_string()],
             "nopeNoshihsi",
             "nopeNoshihsi",
             "initial",
@@ -140,7 +138,7 @@ mod tests {
 
         let test_commit = Commit {
             tree_hash: "c192349d0ee530038e5d925fdd701652ca755ba8".to_string(),
-            parent: "a02b83cb54ba139e5c9d623a2fcf5424552946e0".to_string(),
+            parents: vec!["a02b83cb54ba139e5c9d623a2fcf5424552946e0".to_string()],
             author: "nopeNoshihsi".to_string(),
             committer: "nopeNoshihsi".to_string(),
             date: time,
@@ -168,7 +166,7 @@ initial
         // Verify the Commit instance's properties
         let test_commit = Commit {
             tree_hash: "c192349d0ee530038e5d925fdd701652ca755ba8".to_string(),
-            parent: "a02b83cb54ba139e5c9d623a2fcf5424552946e0".to_string(),
+            parents: vec!["a02b83cb54ba139e5c9d623a2fcf5424552946e0".to_string()],
             author: "nopeNoshihsi".to_string(),
             committer: "nopeNoshihsi".to_string(),
             date: Utc.timestamp_opt(1687619045, 0).unwrap(),
@@ -183,7 +181,7 @@ initial
         let time = Utc.timestamp_opt(1687619045, 0).unwrap();
         let commit = Commit {
             tree_hash: "c192349d0ee530038e5d925fdd701652ca755ba8".to_string(),
-            parent: "a02b83cb54ba139e5c9d623a2fcf5424552946e0".to_string(),
+            parents: vec!["a02b83cb54ba139e5c9d623a2fcf5424552946e0".to_string()],
             author: "nopeNoshihsi".to_string(),
             committer: "nopeNoshihsi".to_string(),
             date: time,

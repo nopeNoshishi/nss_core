@@ -5,8 +5,11 @@ use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
 // External
-use anyhow::{bail, Result};
+use anyhow::{bail, Result, Error};
 use dirs::home_dir;
+
+// Intenal
+use crate::repo::error::*;
 
 pub fn read_contet_with_string<P: AsRef<Path>>(file_path: P) -> Result<String> {
     let mut file = OpenOptions::new().read(true).open(file_path)?;
@@ -24,24 +27,37 @@ pub fn read_contet_with_bytes<P: AsRef<Path>>(file_path: P) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-pub fn open_file_trucate<P: AsRef<Path>>(file_path: P, buffer: &[u8]) -> std::io::Result<()> {
+pub fn open_file_trucate<P: AsRef<Path>>(file_path: P, buffer: &[u8]) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .truncate(true)
-        .open(file_path)?;
+        .open(file_path)
+        .map_err(|e| Error::new(e))?;
 
-    file.write_all(buffer)
+    file.write_all(buffer).map_err(|e| Error::new(e))
 }
 
-pub fn create_file_with_buffer<P: AsRef<Path>>(file_path: P, buffer: &[u8]) -> std::io::Result<()> {
+pub fn create_with_buffer<P: AsRef<Path>>(file_path: P, buffer: &[u8]) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
-        .open(file_path)?;
+        .open(file_path)
+        .map_err(|_| ObjectError::AlreadyExistsObject)?;
 
-    file.write_all(buffer)
+    file.write_all(buffer).map_err(|e| Error::new(e))
 }
+
+pub fn create_new_with_buffer<P: AsRef<Path>>(file_path: P, buffer: &[u8]) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(file_path)
+        .map_err(|_| ObjectError::AlreadyExistsObject)?;
+
+    file.write_all(buffer).map_err(|e| Error::new(e))
+}
+
 
 pub fn create_dir<P: AsRef<Path>>(dir_path: P) -> std::io::Result<()> {
     fs::create_dir_all(dir_path)
@@ -223,7 +239,7 @@ name = \"nopipi\"
         let buffer = b"Hello, world!";
 
         // Run the function under test
-        assert!(create_file_with_buffer(&file_path, buffer).is_ok());
+        assert!(create_with_buffer(&file_path, buffer).is_ok());
 
         // Verify that the file is created and its contents match the buffer
         let mut file = fs::File::open(&file_path).unwrap();

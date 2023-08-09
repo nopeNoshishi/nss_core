@@ -1,11 +1,13 @@
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum ObjectError {
     #[error("No existed path!")]
     NotFoundPath,
     #[error("No existed object!")]
     NotFoundObject,
+    #[error("Already existed obkect!")]
+    AlreadyExistsObject,
     #[error("Need more hash value digit (less digit)")]
     LessObjectHash,
     #[error("Need more hash value digit (nearly hash value exists)")]
@@ -14,7 +16,16 @@ pub enum ObjectError {
     DontMatchType(String, String),
 }
 
+#[derive(Error, Debug)]
+pub enum RepositoryError {
+    #[error("Detached head")]
+    DetachHead,
+    #[error("Dismatch hash bookmark {0}")]
+    DontMatchHashAtBookmarker(String),
+}
+
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]

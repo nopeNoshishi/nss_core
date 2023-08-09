@@ -12,7 +12,11 @@ use flate2::Compression;
 use crate::config::Config;
 use crate::error::*;
 use crate::nss_io::file_system;
-use crate::struct_set::{Hashable, Index, IndexVesion1, Object};
+use crate::struct_set::{Hashable, Index, IndexVesion1, Object, Commit};
+
+type BookMarker = String;
+type CommitHash = String;
+
 
 // Manager for repository absolute path
 #[derive(Debug, Clone)]
@@ -49,13 +53,13 @@ impl NssRepository {
             .join(file)
     }
 
-    pub fn bookmarks_path(&self, bookmarker: &str) -> PathBuf {
+    pub fn bookmarks_path<S: AsRef<str>>(&self, bookmarker: S) -> PathBuf {
         self.root
             .clone()
             .join(".nss")
             .join("bookmarks")
             .join("local")
-            .join(bookmarker)
+            .join(bookmarker.as_ref())
     }
 
     pub fn config_path(&self) -> PathBuf {
@@ -80,13 +84,32 @@ impl NssRepository {
     }
 
     pub fn write_head<S: AsRef<str>>(&self, hash_or_bookmark: S) -> Result<()> {
-        let content = format!("bookmarker: {}", hash_or_bookmark.as_ref());
-        file_system::open_file_trucate(self.config_path(), content.as_bytes())?;
+
+        let hash_or_bookmark = match self.read_bookmark(&hash_or_bookmark) {
+            Ok(_) => format!("bookmarks/local/{}", hash_or_bookmark.as_ref()),
+            Err(_) => hash_or_bookmark.as_ref().to_string()
+        };
+
+        let content = format!("bookmarker: {}", hash_or_bookmark);
+        file_system::open_file_trucate(self.head_path(), content.as_bytes())?;
 
         Ok(())
     }
 
-    pub fn read_head(&self) -> Result<Object> {
+    pub fn read_head_base(&self) -> Result<BookMarker> {
+        let content = file_system::read_contet_with_string(self.head_path())?;
+        let prefix_path = content.split(' ').collect::<Vec<&str>>();
+
+        if prefix_path[1].contains('/') {
+            let bookmarker = prefix_path[1].split('/').collect::<Vec<&str>>()[2];
+
+            Ok(bookmarker.to_string())
+        } else {
+            bail!(RepositoryError::DetachHead)
+        }
+    }
+
+    pub fn read_head(&self) -> Result<CommitHash> {
         let content = file_system::read_contet_with_string(self.head_path())?;
         let prefix_path = content.split(' ').collect::<Vec<&str>>();
 
@@ -94,10 +117,42 @@ impl NssRepository {
             let bookmarker = prefix_path[1].split('/').collect::<Vec<&str>>()[2];
             let hash = file_system::read_contet_with_string(self.bookmarks_path(bookmarker))?;
 
-            return self.read_object(hash);
+            return Ok(hash)
         }
 
-        self.read_object(prefix_path[1])
+        Ok(prefix_path[1].to_string())
+    }
+
+    pub fn read_head_with_commit(&self) -> Result<Commit> {
+        let content = file_system::read_contet_with_string(self.head_path())?;
+        let prefix_path = content.split(' ').collect::<Vec<&str>>();
+
+        if prefix_path[1].contains('/') {
+            let bookmarker = prefix_path[1].split('/').collect::<Vec<&str>>()[2];
+            let hash = file_system::read_contet_with_string(self.bookmarks_path(bookmarker))?;
+
+            match self.read_object(hash)? {
+                Object::Commit(c) => return Ok(c),
+                _ => bail!(ObjectError::DontMatchType(prefix_path[1].to_string(), "commit".to_string()))
+            }
+        }
+
+        match self.read_object(prefix_path[1])? {
+            Object::Commit(c) => Ok(c),
+            _ => bail!(ObjectError::DontMatchType(prefix_path[1].to_string(), "commit".to_string()))
+        }
+    }
+
+    pub fn write_bookmark<S: AsRef<str>>(&self, bookmarker: S, hash: CommitHash) -> Result<()> {
+        file_system::open_file_trucate(self.bookmarks_path(bookmarker), hash.as_bytes())?;
+
+        Ok(())
+    }
+
+    pub fn read_bookmark<S: AsRef<str>>(&self, bookmarker: S) -> Result<CommitHash> {
+        let content = file_system::read_contet_with_string(self.bookmarks_path(bookmarker))?;
+
+        Ok(content)
     }
 
     pub fn index_path(&self) -> PathBuf {
@@ -125,7 +180,7 @@ impl NssRepository {
         encoder.write_all(&object.as_bytes())?;
         let compressed = encoder.finish()?;
 
-        file_system::create_file_with_buffer(object_path, &compressed)?;
+        file_system::create_new_with_buffer(object_path, &compressed)?;
 
         Ok(())
     }
@@ -141,6 +196,22 @@ impl NssRepository {
         decoder.read_to_end(&mut object_content)?;
 
         Object::from_content(object_content)
+    }
+
+    pub fn read_commit<S: AsRef<str>>(&self, hash: S) -> Result<Commit> {
+        let hash_path = self.try_get_objects_path(hash.as_ref())?;
+
+        let bytes = file_system::read_contet_with_bytes(&hash_path)?;
+
+        // Decode
+        let mut decoder = ZlibDecoder::new(&bytes[..]);
+        let mut object_content: Vec<u8> = Vec::new();
+        decoder.read_to_end(&mut object_content)?;
+
+        match Object::from_content(object_content)? {
+            Object::Commit(c) => Ok(c),
+            _ => bail!(ObjectError::DontMatchType(hash_path.to_string_lossy().to_string(), "commit".to_string()))
+        }
     }
 
     /// Return your object database **absolutely** path

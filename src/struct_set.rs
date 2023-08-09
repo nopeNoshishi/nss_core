@@ -5,6 +5,7 @@ pub mod metadata;
 pub mod object;
 pub mod tree;
 pub mod diff;
+pub mod commit_graph;
 
 pub use blob::Blob;
 pub use commit::Commit;
