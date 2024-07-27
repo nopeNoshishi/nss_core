@@ -1,5 +1,10 @@
 //! config
 //! Format: toml
+//!     User:
+//!         - name
+//!         - email
+//!     Descprition
+//!
 
 use serde::{Deserialize, Serialize};
 

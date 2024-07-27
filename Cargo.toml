@@ -2,7 +2,7 @@
 name = "nss_core"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.69"
+rust-version = "1.80.0"
 authors = ["noshishi"]
 readme = "README.md"
 description = "nssi core logic"
@@ -24,14 +24,14 @@ byteorder = "1.4.3"
 colored = "2"
 chrono = "0.4.6"
 dirs = "4.0.0"
-flate2 = "1.0.25"
-sha-1 = "0.9.1"
+flate2 = "1.0"
+sha1 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_bytes = "0.11"
 hex = "0.4.2"
-whoami = "1.4.0"
-toml = "0.7.4"
+whoami = "1.5"
+toml = "0.8"
 similar = "2.2.1"
 
 [dev-dependencies]

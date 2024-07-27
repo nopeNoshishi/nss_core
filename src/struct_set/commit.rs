@@ -1,9 +1,13 @@
+// std
+use std::fmt::Write;
+
 // External
 use anyhow::Result;
 use chrono::prelude::{DateTime, Utc};
 use chrono::TimeZone;
 
 // Internal
+use super::error::Error;
 use super::object::Hashable;
 
 /// **Commit Struct**
@@ -20,9 +24,6 @@ pub struct Commit {
 }
 
 impl Commit {
-    /// Create commit with the repo tree object, config infomation and message.
-    ///
-    /// This tree_hash must be in the database.
     pub fn new<S: Into<String>>(
         tree_hash: S,
         parents: Vec<String>,
@@ -32,7 +33,7 @@ impl Commit {
     ) -> Result<Self> {
         Ok(Self {
             tree_hash: tree_hash.into(),
-            parents: parents,
+            parents,
             author: author.into(),
             committer: committer.into(),
             date: Utc::now(),
@@ -40,7 +41,7 @@ impl Commit {
         })
     }
 
-    pub fn from_rawobject(content: &[u8]) -> Result<Self> {
+    pub fn from_rawobject(content: &[u8]) -> Result<Self, Error> {
         let all_line = content
             .split(|&x| x == b'\n')
             .filter(|x| x != b"")
@@ -65,15 +66,17 @@ impl Commit {
                 "date" => date = split.next().unwrap().to_string(),
                 s => message = s.to_string(),
             }
-
         });
+
+        let timestamp = date.parse::<i64>().unwrap();
+        let date = Utc.timestamp_opt(timestamp, 0).unwrap();
 
         Ok(Self {
             tree_hash,
             parents,
             author,
             committer,
-            date: Utc.timestamp_opt(date.parse::<i64>()?, 0).unwrap(),
+            date,
             message,
         })
     }
@@ -82,10 +85,10 @@ impl Commit {
 impl std::fmt::Display for Commit {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let tree = format!("tree {}", self.tree_hash);
-        let parents: String = self.parents
-            .iter()
-            .map(|s| format!("parent {}\n", s))
-            .collect();
+        let parents: String = self.parents.iter().fold(String::new(), |mut s, b| {
+            let _ = writeln!(s, "parent {b}");
+            s
+        });
         let author = format!("author {}", self.author);
         let committer = format!("committer {}", self.committer);
         let date = format!("date {}", self.date.timestamp());
@@ -101,10 +104,10 @@ impl std::fmt::Display for Commit {
 impl Hashable for Commit {
     fn as_bytes(&self) -> Vec<u8> {
         let tree_hash = format!("tree {}", self.tree_hash);
-        let parents: String = self.parents
-            .iter()
-            .map(|s| format!("parent {}\n", s))
-            .collect();
+        let parents: String = self.parents.iter().fold(String::new(), |mut s, b| {
+            let _ = writeln!(s, "parent {b}");
+            s
+        });
         let author = format!("author {}", self.author);
         let committer = format!("committer {}", self.committer);
         let date = format!("date {}", self.date.timestamp());

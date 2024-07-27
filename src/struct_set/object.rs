@@ -2,12 +2,11 @@
 use std::path::Path;
 
 // External
-use anyhow::{bail, Result};
 use sha1::{Digest, Sha1};
 
 // Internal
+use super::error::Error;
 use super::{Blob, Commit, Tree};
-use crate::error::*;
 
 /// **Object Enum**
 ///
@@ -23,9 +22,9 @@ impl Object {
     /// Create object with the path.
     ///
     /// This path must be in the working directory.
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         if !path.as_ref().exists() {
-            bail!(ObjectError::NotFoundPath)
+            return Err(Error::NotFoundPath);
         }
         match path.as_ref().is_file() {
             true => Blob::new(path.as_ref()).map(Object::Blob),
@@ -33,12 +32,12 @@ impl Object {
         }
     }
 
-    pub fn from_content(raw_content: Vec<u8>) -> Result<Self> {
+    pub fn from_content(raw_content: Vec<u8>) -> Result<Self, Error> {
         let mut iter = raw_content.splitn(2, |&x| x == b'\0');
 
         // header ≒ b"<object-type> <contnet-size>"
         let header = iter.next().unwrap().to_vec();
-        let header = String::from_utf8(header)?;
+        let header = String::from_utf8(header).unwrap();
         let object_type = header.split(' ').collect::<Vec<&str>>()[0];
 
         // content ≒ b"<contnet>"
@@ -54,9 +53,9 @@ impl Object {
     /// To tarnsform object name.
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Blob(_blob) => "blob",
-            Self::Tree(_tree) => "tree",
-            Self::Commit(_commit) => "commit",
+            Self::Blob(_) => "blob",
+            Self::Tree(_) => "tree",
+            Self::Commit(_) => "commit",
         }
     }
 }
@@ -94,7 +93,7 @@ pub trait Hashable {
 
     /// Content to hash by sha1 hash function.
     fn to_hash(&self) -> Vec<u8> {
-        Vec::from(Sha1::digest(&self.as_bytes()).as_slice())
+        Vec::from(Sha1::digest(self.as_bytes()).as_slice())
     }
 }
 

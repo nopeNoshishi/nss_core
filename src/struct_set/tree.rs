@@ -4,10 +4,10 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 // External
-use anyhow::Result;
-// TODO: use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 // Internal
+use super::error::Error;
 use super::{FileMeta, Hashable, Object};
 
 /// **Entry Struct**
@@ -15,7 +15,7 @@ use super::{FileMeta, Hashable, Object};
 /// This struct contains blob( or tree) object's mode, name, hash.
 /// Since blob and tree do not know their own names, it is necessary
 /// to string them together in this structure.
-#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
 pub struct Entry {
     pub mode: u32,
     pub name: OsString,
@@ -23,7 +23,7 @@ pub struct Entry {
 }
 
 impl Entry {
-    pub fn new<P: AsRef<Path>>(path: P, object: Object) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P, object: Object) -> Result<Self, Error> {
         let metadata = path.as_ref().metadata()?;
         let mode = metadata.mode();
 
@@ -34,7 +34,7 @@ impl Entry {
         Ok(Self { mode, name, hash })
     }
 
-    pub fn new_group<P: AsRef<Path>>(path: P, entries: Vec<Entry>) -> Result<Self> {
+    pub fn new_group<P: AsRef<Path>>(path: P, entries: Vec<Entry>) -> Result<Self, Error> {
         let metadata = path.as_ref().metadata()?;
         let mode = metadata.mode();
 
@@ -49,7 +49,7 @@ impl Entry {
     /// Create Entry with RawObject.
     ///
     /// **Note:** This related function is intended to be called through Tree sturuct.
-    fn from_rawobject(meta: &[u8], hash: &[u8]) -> Result<Self> {
+    fn from_rawobject(meta: &[u8], hash: &[u8]) -> Result<Self, Error> {
         // meta = b"<pre_file hash><this file mode> <this file relative path>"
         // hash_next = b"<this_file hash><next file mode> <next file relative path>"
 
@@ -114,7 +114,7 @@ impl std::fmt::Display for Entry {
 /// **Tree Struct**
 ///
 /// This struct represents a directory object.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Tree {
     pub entries: Vec<Entry>,
 }
@@ -123,14 +123,14 @@ impl Tree {
     /// Create Tree with the path.
     ///
     /// This path must be in the working directory.
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let read_dir = path.as_ref().read_dir()?;
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let read_dir = path.as_ref().read_dir().unwrap();
 
-        let ignores = vec![PathBuf::from(".git"), PathBuf::from(".nss")];
+        let ignores = [PathBuf::from(".git"), PathBuf::from(".nss")];
 
         let mut entries: Vec<Entry> = vec![];
         for dir_entry in read_dir {
-            let path = dir_entry?.path();
+            let path = dir_entry.unwrap().path();
 
             if ignores.iter().any(|p| p == path.file_name().unwrap()) {
                 continue;
@@ -152,7 +152,7 @@ impl Tree {
     }
 
     /// Create Object with RawObject.
-    pub fn from_rawobject(content: &[u8]) -> Result<Self> {
+    pub fn from_rawobject(content: &[u8]) -> Result<Self, Error> {
         let entries: Vec<Entry> = Vec::new();
         let mut contnets = content.splitn(2, |&b| b == b'\0');
         let mut header = contnets.next().unwrap();
@@ -232,13 +232,14 @@ fn split_content(contents: &[u8]) -> Vec<&[u8]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
     use std::env;
     use std::fs;
     use std::path::PathBuf;
     use testdir::testdir;
 
     #[test]
-    fn test_entry_new() {
+    fn test_entry_new() -> Result<()> {
         // Create a temporary directory for testing
         let temp_dir = testdir!();
         println!("Test Directory: {:?}", temp_dir);
@@ -249,10 +250,10 @@ mod tests {
             .join("tests")
             .join("test_repo")
             .join("first.rs");
-        fs::copy(&test_file, &temp_file).unwrap();
+        fs::copy(&test_file, &temp_file)?;
 
         // Vertify existed file
-        let object = Object::new(&temp_file).unwrap();
+        let object = Object::new(&temp_file)?;
         let result = Entry::new(&temp_file, object);
         assert!(result.is_ok());
 
@@ -276,10 +277,12 @@ mod tests {
             hex::encode(entry.hash),
             "c192349d0ee530038e5d925fdd701652ca755ba8"
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_entry_group_new() {
+    fn test_entry_group_new() -> Result<()> {
         // Create a temporary directory for testing
         let temp_dir = testdir!();
         println!("Test Directory: {}", temp_dir.display());
@@ -300,10 +303,10 @@ mod tests {
         fs::copy(&test_file2, &temp_file2).unwrap();
 
         // Vec entries
-        let object1 = Object::new(&temp_file1).unwrap();
-        let entry1 = Entry::new(&temp_file1, object1).unwrap();
-        let object2 = Object::new(&temp_file2).unwrap();
-        let entry2 = Entry::new(&temp_file2, object2).unwrap();
+        let object1 = Object::new(&temp_file1)?;
+        let entry1 = Entry::new(&temp_file1, object1)?;
+        let object2 = Object::new(&temp_file2)?;
+        let entry2 = Entry::new(&temp_file2, object2)?;
 
         let entries = vec![entry1, entry2];
 
@@ -320,21 +323,25 @@ mod tests {
         );
 
         // Clean up: Remove the test dir
-        fs::remove_dir_all(temp_dir).unwrap();
+        fs::remove_dir_all(temp_dir)?;
+
+        Ok(())
     }
 
     #[test]
-    fn test_from_rawobject() {
+    fn test_from_rawobject() -> Result<()> {
         // let meta = b"<this file relative path>";
         // let hash_next = b"<next file mode> <next file relative path>";
 
         // let cont = b"33188 first.rs\x00\\s\x00\x8b\xa7Us\xc2\rj\x8anU}\x05V\xd4\xa8A333188 second.rs\x00xj\xc6%\x91\xa38\xfc\xebv)RkW\x8bq\x0f\xca\x01";
         // Clean up: Remove the test dir
         // fs::remove_dir_all(temp_dir).unwrap();
+
+        Ok(())
     }
 
     #[test]
-    fn test_entry_from_filemata() {
+    fn test_entry_from_filemata() -> Result<()> {
         // Create a temporary directory for testing
         let temp_dir = testdir!();
         println!("Test Directory: {}", temp_dir.display());
@@ -344,6 +351,8 @@ mod tests {
 
         // Clean up: Remove the test dir
         fs::remove_dir_all(temp_dir).unwrap();
+
+        Ok(())
     }
 
     #[test]
