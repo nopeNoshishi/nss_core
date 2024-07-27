@@ -3,7 +3,6 @@ use std::ffi::OsString;
 use std::path::Path;
 
 // External
-use anyhow::Result;
 use byteorder::{BigEndian, ByteOrder};
 use chrono::prelude::Local;
 use chrono::TimeZone;
@@ -11,6 +10,7 @@ use chrono::TimeZone;
 // TODO use serde::{Deserialize, Serialize};
 
 // Internal
+use super::error::Error;
 use super::{Blob, Hashable};
 use crate::repository::NssRepository;
 
@@ -32,7 +32,7 @@ pub struct FileMeta {
 }
 
 impl FileMeta {
-    pub fn new<P: AsRef<Path>>(repository: &NssRepository, path: P) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(repository: &NssRepository, path: P) -> Result<Self, Error> {
         // NOTE: Only unix metadata
         use std::os::unix::prelude::MetadataExt;
 
@@ -55,7 +55,7 @@ impl FileMeta {
 
         // absolute path -> relative path (from repo path)
         let filename = path
-            .strip_prefix(repository.path())
+            .strip_prefix(repository.root.clone())
             .unwrap()
             .as_os_str()
             .to_os_string();
@@ -78,7 +78,7 @@ impl FileMeta {
         })
     }
 
-    pub fn new_temp<P: AsRef<Path>>(temp_path: P, temp_prefix: P) -> Result<Self> {
+    pub fn new_temp<P: AsRef<Path>>(temp_path: P, temp_prefix: P) -> Result<Self, Error> {
         // NOTE: Only unix metadata
         use std::os::unix::prelude::MetadataExt;
 
@@ -282,7 +282,6 @@ mod tests {
 
     #[test]
     fn test_filemeta_from_rawindex() {
-        // Create a temporary directory for testing
         let temp_dir = testdir!();
         println!("Test Directory: {}", temp_dir.display());
 

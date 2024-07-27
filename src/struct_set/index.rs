@@ -1,20 +1,19 @@
 // Std
-use std::ffi::OsString;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 // External
-use anyhow::{bail, Result};
 use byteorder::{BigEndian, ByteOrder};
 // TODO use serde::{Deserialize, Serialize};
 
 // Internal
-use super::{Blob, FileMeta, Hashable, Object, Tree, Diff, DIffTag};
-use crate::nss_io::file_system;
-use crate::repo::error::*;
-use crate::repo::repository::NssRepository;
+use super::error::Error;
+use super::{Blob, DIffTag, Diff, FileMeta, Hashable, Object, Tree};
+use crate::nss_io::file_system::{create_dir, remove_dir_all, write_content, WriteMode};
+use crate::repo::repository::{get_all_paths_ignore, NssRepository, PathRepository};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Index {
     pub version: u32,
     pub filemetas: Vec<FileMeta>,
@@ -28,8 +27,8 @@ impl Index {
         }
     }
 
-    pub fn new_all(repository: &NssRepository) -> Result<Self> {
-        let mut all_paths = repository.get_all_paths_ignore(repository.path());
+    pub fn new_all(repository: &NssRepository) -> Result<Self, Error> {
+        let mut all_paths = get_all_paths_ignore(repository.root.clone(), &repository.root);
         all_paths.sort();
 
         let filemetas = all_paths
@@ -48,7 +47,7 @@ impl Index {
         repository: &NssRepository,
         file_path: P,
         temp_prefix: Option<P>,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let add_filemeta = match temp_prefix {
             Some(p) => FileMeta::new_temp(file_path, p)?,
             None => FileMeta::new(repository, file_path)?,
@@ -69,24 +68,24 @@ impl Index {
         Ok(())
     }
 
-    pub fn try_from_tree(repository: &NssRepository, tree: Tree) -> Result<Self> {
+    pub fn try_from_tree(repository: &NssRepository, tree: Tree) -> Result<Self, Error> {
         let mut index = Index::empty();
         let mut path_blob: HashMap<PathBuf, Blob> = HashMap::new();
 
         let temp_dir = repository.temp_path(hex::encode(tree.to_hash()));
-        file_system::create_dir(&temp_dir)?;
+        create_dir(&temp_dir)?;
 
         push_paths(repository, &mut path_blob, tree, &temp_dir)?;
 
         // Tempolary create file -> filemeta
         for (path, blob) in path_blob {
-            file_system::create_dir(path.parent().unwrap())?;
-            file_system::create_new_with_buffer(&path, &blob.content)?;
+            create_dir(path.parent().unwrap())?;
+            write_content(&path, &blob.content, WriteMode::CreateNewTrucateWithZlib)?;
 
             index.add(repository, path, Some(temp_dir.clone()))?;
         }
 
-        file_system::remove_dir_all(temp_dir)?;
+        remove_dir_all(temp_dir)?;
 
         Ok(index)
     }
@@ -105,24 +104,26 @@ fn push_paths(
     path_blob: &mut HashMap<PathBuf, Blob>,
     tree: Tree,
     base_path: &Path,
-) -> Result<()> {
+) -> Result<(), Error> {
     for entry in tree.entries {
         let path = base_path.join(&entry.name);
 
         if entry.as_type() == "blob" {
-            let blob = match repository.read_object(hex::encode(&entry.hash))? {
-                Object::Blob(b) => b,
-                _ => bail!(ObjectError::DontMatchType(
-                    "Blob".to_string(),
-                    hex::encode(entry.hash)
-                )),
+            let blob = match repository.objects().read(hex::encode(&entry.hash)) {
+                Ok(Object::Blob(b)) => b,
+                _ => {
+                    return Err(Error::DontMatchType(
+                        "Blob".to_string(),
+                        hex::encode(entry.hash),
+                    ))
+                }
             };
             path_blob.insert(path, blob);
         } else {
             let hash = hex::encode(entry.hash);
-            let sub_tree = match repository.read_object(&hash)? {
-                Object::Tree(t) => t,
-                _ => bail!(ObjectError::DontMatchType("Tree".to_string(), hash)),
+            let sub_tree = match repository.objects().read(&hash) {
+                Ok(Object::Tree(t)) => t,
+                _ => return Err(Error::DontMatchType("Tree".to_string(), hash)),
             };
 
             push_paths(repository, path_blob, sub_tree, &path)?
@@ -134,7 +135,7 @@ fn push_paths(
 
 pub trait IndexVesion1 {
     fn as_bytes(&self) -> Vec<u8>;
-    fn from_rawindex(buf: Vec<u8>) -> Result<Self>
+    fn from_rawindex(buf: Vec<u8>) -> Result<Self, Error>
     where
         Self: Sized;
 }
@@ -163,9 +164,9 @@ impl IndexVesion1 for Index {
         [header, filemetas_vec.concat()].concat()
     }
 
-    fn from_rawindex(buf: Vec<u8>) -> Result<Self> {
-        if buf == Vec::<u8>::new() {
-            bail!("First index");
+    fn from_rawindex(buf: Vec<u8>) -> Result<Self, Error> {
+        if buf.is_empty() {
+            return Ok(Index::default());
         }
 
         let entry_num = BigEndian::read_u32(&buf[8..12]) as usize;
@@ -212,21 +213,26 @@ impl IndexVesion1 for Index {
 
 impl Diff<Index, OsString> for Index {
     fn diff(&self, vs: Index) -> Vec<(DIffTag, OsString)> {
-
         let mut changes = Vec::new();
 
-        let new_metas: HashMap<OsString, Vec<u8>> = self.filemetas.iter().map(|f| (f.filename.clone(), f.hash.clone())).collect();
-        let old_metas: HashMap<OsString, Vec<u8>> = vs.filemetas.iter().map(|f| (f.filename.clone(), f.hash.clone())).collect();
+        let new_metas: HashMap<OsString, Vec<u8>> = self
+            .filemetas
+            .iter()
+            .map(|f| (f.filename.clone(), f.hash.clone()))
+            .collect();
+        let old_metas: HashMap<OsString, Vec<u8>> = vs
+            .filemetas
+            .iter()
+            .map(|f| (f.filename.clone(), f.hash.clone()))
+            .collect();
 
         old_metas.iter().for_each(|(k, v)| {
             if !new_metas.contains_key(k) {
                 changes.push((DIffTag::Delete, k.clone()))
+            } else if new_metas.get(k) == Some(v) {
+                changes.push((DIffTag::Equal, k.clone()))
             } else {
-                if new_metas.get(k) == Some(v) {
-                    changes.push((DIffTag::Equal, k.clone()))
-                } else {
-                    changes.push((DIffTag::Replace, k.clone()))
-                }
+                changes.push((DIffTag::Replace, k.clone()))
             }
         });
 
@@ -235,7 +241,7 @@ impl Diff<Index, OsString> for Index {
                 changes.push((DIffTag::Insert, k.clone()))
             }
         });
-        
+
         changes
     }
 }
@@ -323,7 +329,7 @@ mod tests {
 
         let mut index1 = Index::empty();
         index1.filemetas.push(test_filemeta1);
-        
+
         let mut index2 = Index::empty();
         index2.filemetas.push(test_filemeta2);
         index2.filemetas.push(test_filemeta3);
@@ -333,6 +339,5 @@ mod tests {
         for c in change {
             println!("{:?} {:?}", c.0, c.1);
         }
-
     }
 }

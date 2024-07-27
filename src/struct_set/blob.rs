@@ -2,33 +2,29 @@
 use std::path::Path;
 
 // External
-use anyhow::Result;
-// TODO: use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 // Internal
-use crate::nss_io::file_system;
+use super::error::Error;
+use crate::nss_io::file_system::{read_content, ReadMode};
 use crate::struct_set::Hashable;
 
 /// **Blob Struct**
 ///
 /// This struct represents a file object.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 pub struct Blob {
     pub content: Vec<u8>,
 }
 
 impl Blob {
-    /// Create a raw object with hash value.
-    ///
-    /// This path must be in the working directory.
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let content = file_system::read_contet_with_bytes(path.as_ref())?;
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let content = read_content(path.as_ref(), ReadMode::default())?;
 
         Ok(Self { content })
     }
 
-    /// Create Object with RawObject.
-    pub fn from_rawobject(contnet: &[u8]) -> Result<Self> {
+    pub fn from_rawobject(contnet: &[u8]) -> Result<Self, Error> {
         Ok(Self {
             content: contnet.to_vec(),
         })
@@ -54,18 +50,18 @@ impl Hashable for Blob {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
+    use testdir::testdir;
 
+    use anyhow::Result;
     use std::fs;
     use std::fs::File;
     use std::io::prelude::*;
 
     #[test]
-    fn test_blob_new() {
+    fn test_blob_new() -> Result<()> {
         // Create a temporary directory for testing
-        let temp_dir = env::temp_dir().join("nss_test_new_blob");
+        let temp_dir = testdir!();
         println!("Test Directory: {}", temp_dir.display());
-        fs::create_dir(&temp_dir).unwrap();
 
         // Create a temporary file for testing
         let file_path = temp_dir.join("test_file.txt");
@@ -80,8 +76,8 @@ fn commit(message: &str) -> std::io::Result<()> {
     Ok(())
 }";
 
-        let mut file = File::create(&file_path).unwrap();
-        file.write_all(buffer).unwrap();
+        let mut file = File::create(&file_path)?;
+        file.write_all(buffer)?;
 
         // Create a Blob instance using the temporary file
         let blob = Blob::new(&file_path);
@@ -89,11 +85,13 @@ fn commit(message: &str) -> std::io::Result<()> {
         assert!(blob.is_ok());
 
         // Verify the Blob instance's properties
-        let blob = blob.unwrap();
+        let blob = blob?;
         assert_eq!(blob.content, buffer);
 
         // Clean up: Remove the test dir
-        fs::remove_dir_all(temp_dir).unwrap();
+        fs::remove_dir_all(temp_dir)?;
+
+        Ok(())
     }
 
     #[test]
@@ -183,7 +181,7 @@ fn commit(message: &str) -> std::io::Result<()> {
         };
 
         // Format the Blob for display
-        let display = format!("{}", blob.to_string());
+        let display = format!("{}", blob);
 
         // Verify the formatted display string
         assert_eq!(display, "Hello, world!");
