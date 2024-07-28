@@ -11,7 +11,7 @@ use byteorder::{BigEndian, ByteOrder};
 use super::error::Error;
 use super::{Blob, DIffTag, Diff, FileMeta, Hashable, Object, Tree};
 use crate::nss_io::file_system::{create_dir, remove_dir_all, write_content, WriteMode};
-use crate::repo::repository::{get_all_paths_ignore, NssRepository, PathRepository};
+use crate::repo::repository::{get_all_paths_ignore, NssRepository, RepositoryPathAccess};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Index {

@@ -58,6 +58,27 @@ impl Object {
             Self::Commit(_) => "commit",
         }
     }
+
+    pub fn try_into_blob(self) -> Result<Blob, Error> {
+        match self {
+            Self::Blob(b) => Ok(b),
+            _ => Err(Error::NotBlobObject),
+        }
+    }
+
+    pub fn try_into_tree(self) -> Result<Tree, Error> {
+        match self {
+            Self::Tree(t) => Ok(t),
+            _ => Err(Error::NotTreeObject),
+        }
+    }
+
+    pub fn try_into_commit(self) -> Result<Commit, Error> {
+        match self {
+            Self::Commit(c) => Ok(c),
+            _ => Err(Error::NotCommitObject),
+        }
+    }
 }
 
 impl std::fmt::Display for Object {

@@ -5,7 +5,7 @@ use std::collections::{HashSet, VecDeque};
 use anyhow::Result;
 
 // Internal
-use crate::repository::NssRepository;
+use crate::repository::{NssRepository, RepositoryPathAccess};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub struct VertexIndex(usize);
@@ -177,7 +177,7 @@ impl CommitGraph {
             return Ok(());
         }
 
-        let commit = repo.objects().read_commit(&current_hash)?;
+        let commit = repo.objects().read(&current_hash)?.try_into_commit()?;
 
         let child_id = graph.add_vertex(current_hash);
 

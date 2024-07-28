@@ -10,6 +10,15 @@ pub enum Error {
     #[error("No existed object!")]
     NotFoundObject,
 
+    #[error("Not blob object")]
+    NotBlobObject,
+
+    #[error("Not tree object")]
+    NotTreeObject,
+
+    #[error("Not commit object")]
+    NotCommitObject,
+
     #[error("Already existed obkect!")]
     AlreadyExistsObject,
 

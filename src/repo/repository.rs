@@ -1,7 +1,14 @@
 //! Repository addresser
 
+mod bookmark;
+mod config;
+mod head;
+mod index;
+mod objects;
+
 // Std
 use std::fs;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 // External
@@ -10,198 +17,47 @@ use dirs::home_dir;
 // Internal
 use super::config::Config;
 use super::error::Error;
-use crate::nss_io::file_system::{create_dir, read_content, write_content, ReadMode, WriteMode};
 use crate::struct_set::error::Error as StructError;
-use crate::struct_set::{BookMark, Commit, Hashable, Head, Index, IndexVesion1, Object};
+use crate::struct_set::{BookMark, Head, Index, Object};
 
-pub trait Repository<T> {
+const REPO_NAME: &str = ".nss";
+
+#[derive(Debug, Clone)]
+pub struct Repository<T> {
+    root: PathBuf,
+    _maker: PhantomData<T>,
+}
+
+impl<T> Repository<T> {
+    fn new(root: PathBuf) -> Self {
+        Self {
+            root,
+            _maker: PhantomData,
+        }
+    }
+}
+
+pub trait RepositoryAccess<T> {
     fn write(&self, item: T) -> Result<(), Error>;
 
     fn read(&self) -> Result<T, Error>;
 }
 
-pub trait PathRepository<T> {
+pub trait RepositoryPathAccess<T> {
     fn write(&self, item: T) -> Result<(), Error>;
 
     fn read<P: Into<String>>(&self, p: P) -> Result<T, Error>;
 }
 
-const REPO_NAME: &str = ".nss";
-const OBJECT_NAME: &str = "objects";
-const BOOKMARK_NAME: &str = "bookmarks";
-// const LOCAL_NAME: &str = "local";
-const CONFIG_NAME: &str = "config";
-const HEAD_NAME: &str = "HEAD";
-const INDEX_NAME: &str = "INDEX";
-
-#[derive(Debug, Clone)]
-pub struct HeadRepository {
-    root: PathBuf,
-}
-
-impl Repository<Head> for HeadRepository {
-    fn write(&self, item: Head) -> Result<(), Error> {
-        let s = toml::to_string(&item)?;
-        write_content(&self.root, s.as_bytes(), WriteMode::default())?;
-
-        Ok(())
-    }
-
-    fn read(&self) -> Result<Head, Error> {
-        let bytes = read_content(&self.root, ReadMode::default())?;
-        let content = String::from_utf8(bytes)?;
-
-        Ok(toml::from_str(&content)?)
-    }
-}
-
-impl From<PathBuf> for HeadRepository {
-    fn from(root: PathBuf) -> Self {
-        Self { root }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ConfigRepository {
-    root: PathBuf,
-}
-
-impl Repository<Config> for ConfigRepository {
-    fn write(&self, config: Config) -> Result<(), Error> {
-        let content = toml::to_string(&config)?;
-        write_content(&self.root, content.as_bytes(), WriteMode::default())?;
-
-        Ok(())
-    }
-
-    fn read(&self) -> Result<Config, Error> {
-        let bytes = read_content(&self.root, ReadMode::default())?;
-        let content = String::from_utf8(bytes)?;
-
-        Ok(toml::from_str(&content)?)
-    }
-}
-
-impl From<PathBuf> for ConfigRepository {
-    fn from(root: PathBuf) -> Self {
-        Self { root }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct IndexRepository {
-    root: PathBuf,
-}
-
-impl Repository<Index> for IndexRepository {
-    fn write(&self, index: Index) -> Result<(), Error> {
-        write_content(&self.root, &index.as_bytes(), WriteMode::default())?;
-
-        Ok(())
-    }
-
-    fn read(&self) -> Result<Index, Error> {
-        let bytes = read_content(&self.root, ReadMode::default())?;
-
-        Ok(Index::from_rawindex(bytes)?)
-    }
-}
-
-impl From<PathBuf> for IndexRepository {
-    fn from(root: PathBuf) -> Self {
-        Self { root }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ObjectRepository {
-    root: PathBuf,
-}
-
-impl ObjectRepository {
-    pub fn read_commit<P: Into<String>>(&self, p: P) -> Result<Commit, Error> {
-        match self.read(p) {
-            Ok(Object::Commit(c)) => Ok(c),
-            _ => Err(Error::NssStruct(StructError::CannotSpecifyHash)),
-        }
-    }
-}
-
-impl PathRepository<Object> for ObjectRepository {
-    fn write(&self, item: Object) -> Result<(), Error> {
-        let hash = hex::encode(item.to_hash());
-        let (d, f) = split_hash(&hash);
-        let p = self.root.join(d).join(f);
-        create_dir(self.root.join(d))?;
-        write_content(p, &item.as_bytes(), WriteMode::CreateNewTrucate)?;
-
-        Ok(())
-    }
-
-    fn read<P: Into<String>>(&self, p: P) -> Result<Object, Error> {
-        let p = p.into();
-        let (d, f) = split_hash(&p);
-        let p = self.root.join(d).join(f);
-        let content = read_content(p, ReadMode::default())?;
-
-        Ok(Object::from_content(content)?)
-    }
-}
-
-impl From<PathBuf> for ObjectRepository {
-    fn from(root: PathBuf) -> Self {
-        Self { root }
-    }
-}
-
-fn object_path<T: Into<String>>(root: PathBuf, hash: T) -> (PathBuf, PathBuf) {
-    let hash = hash.into();
-    let (dir, file) = hash.split_at(2);
-
-    let obj_dir = root.join(REPO_NAME).join(OBJECT_NAME).join(dir);
-
-    let obj_file = obj_dir.join(file);
-
-    (obj_dir, obj_file)
-}
-
-#[derive(Debug, Clone)]
-pub struct LocalBookMarkRepository {
-    root: PathBuf,
-}
-
-impl PathRepository<BookMark> for LocalBookMarkRepository {
-    fn write(&self, item: BookMark) -> Result<(), Error> {
-        let p = self.root.join(item.name);
-        write_content(p, item.hash.as_bytes(), WriteMode::default())?;
-
-        Ok(())
-    }
-
-    fn read<P: Into<String>>(&self, bookmarker: P) -> Result<BookMark, Error> {
-        let p = self.root.join(bookmarker.into());
-        let bytes = read_content(&p, ReadMode::default())?;
-        let content = String::from_utf8(bytes)?;
-
-        Ok(BookMark::new(p, content))
-    }
-}
-
-impl From<PathBuf> for LocalBookMarkRepository {
-    fn from(root: PathBuf) -> Self {
-        Self { root }
-    }
-}
-
 // Manager for repository absolute path
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct NssRepository {
     pub root: PathBuf,
-    pub config: ConfigRepository,
-    pub index: IndexRepository,
-    pub objects: ObjectRepository,
-    pub head: HeadRepository,
-    pub bookmark: LocalBookMarkRepository,
+    pub config: Repository<Config>,
+    pub index: Repository<Index>,
+    pub head: Repository<Head>,
+    pub objects: Repository<Object>,
+    pub bookmark: Repository<BookMark>,
 }
 
 impl NssRepository {
@@ -214,11 +70,11 @@ impl NssRepository {
     }
 
     pub fn new(root: PathBuf) -> Self {
-        let config = root.join(REPO_NAME).join(CONFIG_NAME).into();
-        let index = root.join(REPO_NAME).join(INDEX_NAME).into();
-        let objects = root.join(REPO_NAME).join(OBJECT_NAME).into();
-        let head = root.join(REPO_NAME).join(HEAD_NAME).into();
-        let bookmark = root.join(REPO_NAME).join(BOOKMARK_NAME).into();
+        let config = Repository::new(root.join(REPO_NAME).join("config"));
+        let index = Repository::new(root.join(REPO_NAME).join("INDEX"));
+        let objects = Repository::new(root.join(REPO_NAME).join("objects"));
+        let head = Repository::new(root.join(REPO_NAME).join("HEAD"));
+        let bookmark = Repository::new(root.join(REPO_NAME).join("bookmarkers"));
 
         Self {
             root,
@@ -230,35 +86,58 @@ impl NssRepository {
         }
     }
 
-    pub fn config(&self) -> &ConfigRepository {
+    pub fn create(root: PathBuf) -> Result<Self, Error> {
+        let config = Repository::<Config>::new(root.join(REPO_NAME));
+        let index = Repository::new(root.join(REPO_NAME));
+        let objects = Repository::new(root.join(REPO_NAME));
+        let head = Repository::new(root.join(REPO_NAME));
+        let bookmark = Repository::new(root.join(REPO_NAME));
+
+        Ok(Self {
+            root,
+            config,
+            index,
+            objects,
+            head,
+            bookmark,
+        })
+    }
+
+    pub fn config(&self) -> &Repository<Config> {
         &self.config
     }
 
-    pub fn index(&self) -> &IndexRepository {
+    pub fn index(&self) -> &Repository<Index> {
         &self.index
     }
 
-    pub fn objects(&self) -> &ObjectRepository {
+    pub fn objects(&self) -> &Repository<Object> {
         &self.objects
     }
 
-    pub fn head(&self) -> &HeadRepository {
+    pub fn head(&self) -> &Repository<Head> {
         &self.head
     }
 
-    pub fn bookmark(&self) -> &LocalBookMarkRepository {
+    pub fn bookmark(&self) -> &Repository<BookMark> {
         &self.bookmark
     }
-
-    // pub fn create(root: PathBuf) -> Self {
-
-    //     Self { root, config, index, objects, head, bookmark }
-    // }
 }
 
 // utility
-pub fn split_hash(hash: &str) -> (&str, &str) {
+pub(crate) fn split_hash(hash: &str) -> (&str, &str) {
     hash.split_at(2)
+}
+
+pub(crate) fn object_path<T: Into<String>>(root: PathBuf, hash: T) -> (PathBuf, PathBuf) {
+    let hash = hash.into();
+    let (dir, file) = hash.split_at(2);
+
+    let obj_dir = root.join(REPO_NAME).join("objects").join(dir);
+
+    let obj_file = obj_dir.join(file);
+
+    (obj_dir, obj_file)
 }
 
 pub fn try_get_objects_path<T: Into<String>>(root: PathBuf, hash: T) -> Result<PathBuf, Error> {
@@ -389,94 +268,10 @@ pub fn exists_repo<P: AsRef<Path>>(repo_dir: Option<P>) -> Result<NssRepository,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repo::config::*;
 
     use anyhow::Result;
-    use std::env;
     use std::fs;
-    use std::fs::File;
-    use std::io::Read;
     use testdir::testdir;
-
-    #[test]
-    fn test_write_config() -> Result<()> {
-        // Create a temporary directory for testing
-        let temp_dir = testdir! {};
-        println!("Test Directory: {}", temp_dir.display());
-
-        let repository = NssRepository::new(temp_dir.clone());
-        let config_path = repository.path().join(".nss").join(CONFIG_NAME);
-        fs::create_dir_all(repository.path().join(".nss"))?;
-        File::create(&config_path)?;
-
-        // New config
-        let user = User::new(
-            "noshishi".to_string(),
-            Some("nopenoshishi@gmail.com".to_string()),
-        );
-        let config = Config::new(user);
-        let config_contet = "[user]
-name = \"noshishi\"
-email = \"nopenoshishi@gmail.com\"
-";
-
-        repository.config().write(config)?;
-
-        let mut file = File::open(config_path)?;
-        let mut content = String::new();
-        file.read_to_string(&mut content)?;
-
-        assert_eq!(config_contet, content);
-
-        fs::remove_dir_all(temp_dir)?;
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_read_config() {
-        // Create a temporary directory for testing
-        let temp_dir = testdir! {};
-        println!("Test Directory: {}", temp_dir.display());
-
-        let repository = NssRepository::new(temp_dir.clone());
-        fs::create_dir_all(repository.path().join(".nss")).unwrap();
-
-        let test_file = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
-            .join("tests")
-            .join("test_config")
-            .join("config");
-        fs::copy(&test_file, repository.path().join(".nss").join("config")).unwrap();
-
-        let result = repository.config().read();
-        assert!(result.is_ok());
-
-        let test_user = User::new(
-            "noshishi".to_string(),
-            Some("nopenoshishi@gmail.com".to_string()),
-        );
-        let test_config = Config::new(test_user);
-
-        assert_eq!(result.unwrap(), test_config);
-    }
-
-    #[test]
-    fn test_write_head() {}
-
-    #[test]
-    fn test_read_head() {}
-
-    #[test]
-    fn test_write_index() {}
-
-    #[test]
-    fn test_read_index() {}
-
-    #[test]
-    fn test_write_object() {}
-
-    #[test]
-    fn test_read_object() {}
 
     #[test]
     fn test_try_get_objects_path() {}
